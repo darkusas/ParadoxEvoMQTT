@@ -82,7 +82,6 @@ static MQTTAsync client;
 
 static void *mqtt_mgr_thread(void *context);
 static void mqtt_start();
-static void mqtt_subscribe();
 static void mqtt_area_report(void *area_report_reader);
 static void mqtt_zone_report(void *zone_report_reader);
 static void mqtt_send(const char *topic, const char *payload);
@@ -144,8 +143,6 @@ static void *mqtt_mgr_thread(void *context) {
     }
 
     zmq_setsockopt (kill_subscriber, ZMQ_SUBSCRIBE, "", 0);
-
-    mqtt_subscribe();
 
     zmq_pollitem_t items[] = {
         { kill_subscriber, 0, ZMQ_POLLIN, 0 },
@@ -244,7 +241,7 @@ static int mqtt_area_control(void *context, char *topicName, int topicLen, MQTTA
         snprintf(topic, TOPIC_SIZE, UTILITY_KEY_TOPIC, config.mqtt_topic);
 
         if (strcmp(topicName, topic) == 0) {
-            log_debug("MMGR: received Utilty Key %s\n", (char*)message->payload);
+            log_info("MMGR: received Utility Key %s\n", (char*)message->payload);
             int key_num = strtol((char*)message->payload, NULL, 10);
 
             para_arm_cmd_t cmd = { .type = CMD_UTILITY_KEY, .num = key_num, .command = 0 };
@@ -260,25 +257,6 @@ static int mqtt_area_control(void *context, char *topicName, int topicLen, MQTTA
     MQTTAsync_freeMessage(&message);
     MQTTAsync_free(topicName);
     return 1;
-}
-
-static void mqtt_subscribe()
-{
-    snprintf(topic, TOPIC_SIZE, UTILITY_KEY_TOPIC, config.mqtt_topic);
-
-    MQTTAsync_responseOptions opts = MQTTAsync_responseOptions_initializer;
-
-    opts.onSuccess = onSubscribe;
-    opts.onFailure = onSubscribeFailure;
-    opts.context = client;
-
-    int rc = MQTTAsync_subscribe(client, topic, 1, &opts);
-
-    if (rc == MQTTASYNC_SUCCESS) {
-        log_debug("MMGR: Subscribed utility key topic.\n");
-    } else {
-        log_error("MMGR: Subscription utility key control failed: %d\n", rc);
-    }
 }
 
 static void mqtt_area_report(void *area_report_reader)
@@ -437,6 +415,22 @@ static void onConnect(void* context, MQTTAsync_successData* response)
 {
     log_info("MMGR: Connected to MQTT server.\n");
     mqtt_send_lwt();
+    
+    // Subscribe to utility key topic after successful connection
+    snprintf(topic, TOPIC_SIZE, UTILITY_KEY_TOPIC, config.mqtt_topic);
+    
+    MQTTAsync_responseOptions opts = MQTTAsync_responseOptions_initializer;
+    opts.onSuccess = onSubscribe;
+    opts.onFailure = onSubscribeFailure;
+    opts.context = client;
+    
+    int rc = MQTTAsync_subscribe(client, topic, 1, &opts);
+    
+    if (rc == MQTTASYNC_SUCCESS) {
+        log_info("MMGR: Subscribed to utility key topic after connection.\n");
+    } else {
+        log_error("MMGR: Failed to subscribe to utility key topic: %d\n", rc);
+    }
 }
 
 static void onConnectFailure(void* context, MQTTAsync_failureData* response)
@@ -467,12 +461,12 @@ static void onDisconnectFailure(void* context, MQTTAsync_failureData* response) 
 
 static void onSubscribe(void* context, MQTTAsync_successData* response)
 {
-        log_info("MMGR: Subscribe succeeded.\n");
+        log_info("MMGR: MQTT subscription succeeded.\n");
 }
  
 static void onSubscribeFailure(void* context, MQTTAsync_failureData* response)
 {
-        log_error("MMGR: Subscribe failed: [%d] - %s\n", response->code, response->message);
+        log_error("MMGR: MQTT subscription failed: [%d] - %s\n", response->code, response->message);
 }
 
 static void mqtt_send_lwt()
