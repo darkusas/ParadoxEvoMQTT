@@ -50,4 +50,6 @@ pthread_t para_mgr_start(void*);
 
 void para_mgr_clean();
 
+int para_mgr_is_area_configured(int);
+
 #endif /* PARA_MGR_H */

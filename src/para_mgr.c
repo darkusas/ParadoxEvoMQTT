@@ -46,6 +46,7 @@ static void para_area_quick_arm(void *serial_sender, int areanum, char arm_type)
 static void para_request_zone_status(void *serial_sender, int zonenum);
 static void para_request_zone_label(void *serial_sender, int zonenum);
 static void para_utility_key(void *serial_sender, int utility_key);
+static int validate_prt3_string(const char *prt3_string);
 static void para_process_prt3_event(char *prt3_string, void *serial_sender, void *mqtt_area_report, void *mqtt_zone_report);
 static void para_process_prt3_response(char *prt3_string, void *mqtt_area_report, void *mqtt_zone_report);
 static void para_process_command(void *mqtt_area_command, void *serial_sender);
@@ -155,6 +156,13 @@ void para_mgr_clean() {
     }
 }
 
+int para_mgr_is_area_configured(int area_num) {
+    if (area_num < 1 || area_num > MAX_AREAS) {
+        return 0;
+    }
+    return areas[area_num - 1] != NULL;
+}
+
 static void *para_mgr_thread(void *context)
 {
     __label__ EXIT_PMGR_THREAD;
@@ -227,12 +235,17 @@ static void *para_mgr_thread(void *context)
             // Serial responses/events parsing here.
             char *prt3_string = z_receive_string(serial_receiver);
 
-            // log_debug("PMGR: response/event received %s\n", prt3_string);
-
-            if (prt3_string[0] == PRT3_EVENT) {
-                para_process_prt3_event(prt3_string, serial_sender, mqtt_area_report, mqtt_zone_report);
+            // Validate before processing
+            if (validate_prt3_string(prt3_string)) {
+                if (prt3_string[0] == PRT3_EVENT) {
+                    para_process_prt3_event(prt3_string, serial_sender, mqtt_area_report, mqtt_zone_report);
+                } else {
+                    para_process_prt3_response(prt3_string, mqtt_area_report, mqtt_zone_report);
+                }
             } else {
-                para_process_prt3_response(prt3_string, mqtt_area_report, mqtt_zone_report);
+                log_error("PMGR: skipping invalid message\n");
+                // Message is invalid, skip processing
+                // The serial thread should be in resync mode now
             }
 
             free(prt3_string);
@@ -420,6 +433,46 @@ static void para_utility_key(void *serial_sender, int utility_key)
     sprintf(req, "UK%03d", utility_key);
 
     para_send_request(serial_sender, req, 5);
+}
+
+static int validate_prt3_string(const char *prt3_string)
+{
+    if (!prt3_string) {
+        log_error("PMGR: NULL string received\n");
+        return 0;
+    }
+
+    size_t len = strlen(prt3_string);
+
+    if (len == 0) {
+        log_error("PMGR: empty string received\n");
+        return 0;
+    }
+
+    // Check first character is a known response type
+    char first = prt3_string[0];
+    if (first != PRT3_EVENT &&
+        first != PRT3_REQ_RESP &&
+        first != PRT3_AREA &&
+        first != PRT3_ZONE) {
+        log_error("PMGR: invalid message type '%c' (0x%02X) in string: [%s]\n",
+                 first, (unsigned char)first, prt3_string);
+        return 0;
+    }
+
+    // For events, minimum length is 12 characters: G001N001A001
+    if (first == PRT3_EVENT && len < 12) {
+        log_error("PMGR: event message too short (%zu chars): [%s]\n", len, prt3_string);
+        return 0;
+    }
+
+    // For responses, minimum length is 5 characters: RA001
+    if ((first == PRT3_REQ_RESP || first == PRT3_AREA || first == PRT3_ZONE) && len < 5) {
+        log_error("PMGR: response message too short (%zu chars): [%s]\n", len, prt3_string);
+        return 0;
+    }
+
+    return 1;
 }
 
 static void para_process_prt3_event(char *prt3_string, void* serial_sender, void *mqtt_area_report, void *mqtt_zone_report)

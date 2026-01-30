@@ -6,6 +6,7 @@
 #include "endpoints.h"
 #include "log.h"
 #include "mqtt_mgr.h"
+#include "para_mgr.h"
 #include "paratypes.h"
 #include "zmq_helpers.h"
 
@@ -268,23 +269,8 @@ static void mqtt_area_report(void *area_report_reader)
         return;
     }
 
-    if (area->firstreport) {
-        // First incoming report, subscribe to this area's control
-        snprintf(topic, TOPIC_SIZE, AREA_CONTROL_TOPIC, config.mqtt_topic, area->num);
-
-        MQTTAsync_responseOptions opts = MQTTAsync_responseOptions_initializer;
-
-        opts.onSuccess = onSubscribe;
-        opts.onFailure = onSubscribeFailure;
-        opts.context = client;
-
-        int rc = MQTTAsync_subscribe(client, topic, 1, &opts);
-        if (rc == MQTTASYNC_SUCCESS) {
-            log_debug("MMGR: Subscribed to area %d: %d\n", area->num, rc);
-        } else {
-            log_error("MMGR: Subscription to area %d control failed: %d\n", area->num, rc);
-        }
-    }
+    // Note: Area control topic subscriptions are now handled in onConnect()
+    // to ensure they are re-established after reconnection
 
     const char *area_state = mqp_states[area->mqtt_state];
 
@@ -415,21 +401,42 @@ static void onConnect(void* context, MQTTAsync_successData* response)
 {
     log_info("MMGR: Connected to MQTT server.\n");
     mqtt_send_lwt();
-    
+
     // Subscribe to utility key topic after successful connection
     snprintf(topic, TOPIC_SIZE, UTILITY_KEY_TOPIC, config.mqtt_topic);
-    
+
     MQTTAsync_responseOptions opts = MQTTAsync_responseOptions_initializer;
     opts.onSuccess = onSubscribe;
     opts.onFailure = onSubscribeFailure;
     opts.context = client;
-    
+
     int rc = MQTTAsync_subscribe(client, topic, 1, &opts);
-    
+
     if (rc == MQTTASYNC_SUCCESS) {
         log_info("MMGR: Subscribed to utility key topic after connection.\n");
     } else {
         log_error("MMGR: Failed to subscribe to utility key topic: %d\n", rc);
+    }
+
+    // Subscribe to all configured area control topics on every connection
+    // This ensures subscriptions are re-established after reconnection
+    for (int i = 1; i <= MAX_AREAS; i++) {
+        if (para_mgr_is_area_configured(i)) {
+            snprintf(topic, TOPIC_SIZE, AREA_CONTROL_TOPIC, config.mqtt_topic, i);
+
+            MQTTAsync_responseOptions area_opts = MQTTAsync_responseOptions_initializer;
+            area_opts.onSuccess = onSubscribe;
+            area_opts.onFailure = onSubscribeFailure;
+            area_opts.context = client;
+
+            rc = MQTTAsync_subscribe(client, topic, 1, &area_opts);
+
+            if (rc == MQTTASYNC_SUCCESS) {
+                log_info("MMGR: Subscribed to area %d control topic after connection.\n", i);
+            } else {
+                log_error("MMGR: Failed to subscribe to area %d control topic: %d\n", i, rc);
+            }
+        }
     }
 }
 

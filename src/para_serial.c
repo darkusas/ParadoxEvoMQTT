@@ -107,6 +107,7 @@ void *serial_thread(void *context)
     char serial_input[PARA_SERIAL_INPUT_LEN];
     memset(serial_input, 0, PARA_SERIAL_INPUT_LEN);
     int input_pos = 0;
+    int resync_mode = 0;  // 0 = normal mode, 1 = resync mode (flush to next \r)
 
     zmq_pollitem_t items[] = {
         { kill_subscriber, 0, ZMQ_POLLIN, 0 },
@@ -133,33 +134,57 @@ void *serial_thread(void *context)
             if (br > 0) {
                 for (int i = 0; i < br; i++) {
                     if (buffer[i] == PARA_SERIAL_EOL) {
-                        log_verbose("SERIAL: [%s]\n", serial_input);
+                        // Found delimiter
+                        if (resync_mode) {
+                            // Exit resync mode, ready for next clean message
+                            log_info("SERIAL: resync complete, ready for next message\n");
+                            resync_mode = 0;
+                            memset(serial_input, 0, PARA_SERIAL_INPUT_LEN);
+                            input_pos = 0;
+                        } else {
+                            // Normal mode - send accumulated message
+                            if (input_pos > 0) {
+                                log_verbose("SERIAL: [%s]\n", serial_input);
 
-                        // TODO: send out
-                        zmq_msg_t message;
+                                zmq_msg_t message;
+                                zmq_msg_init_size (&message, input_pos);
+                                memcpy(zmq_msg_data(&message), serial_input, input_pos);
+                                zmq_msg_send (&message, serial_publisher, 0);
+                                zmq_msg_close (&message);
+                            } else {
+                                log_error("SERIAL: empty message detected, skipping send\n");
+                            }
 
-                        zmq_msg_init_size (&message, input_pos);
-                        memcpy(zmq_msg_data(&message), serial_input, input_pos);
-                        zmq_msg_send (&message, serial_publisher, 0);
-                        zmq_msg_close (&message);
-
-                        // Cleanup and read again
-                        memset(serial_input, 0, PARA_SERIAL_INPUT_LEN);
-                        input_pos = 0;
+                            // Cleanup and read again
+                            memset(serial_input, 0, PARA_SERIAL_INPUT_LEN);
+                            input_pos = 0;
+                        }
+                    } else if (resync_mode) {
+                        // In resync mode, discard all bytes until delimiter
+                        continue;
                     } else if (buffer[i] != 0) {
+                        // Normal mode - accumulate non-null bytes
                         serial_input[input_pos++] = buffer[i];
 
                         if (input_pos >= PARA_SERIAL_INPUT_LEN - 1) {
-                            // Something awry happened, input should not be that long!
-                            log_error("SERIAL: input buffer [%s] is too long! Read buffer: [%s]\n", serial_input, buffer);
+                            // Buffer overflow protection - enter resync mode
+                            log_error("SERIAL: input buffer overflow! Entering resync mode. Buffer: [%s], Read: [%s]\n",
+                                     serial_input, buffer);
 
+                            resync_mode = 1;
                             memset(serial_input, 0, PARA_SERIAL_INPUT_LEN);
                             input_pos = 0;
-
-                            break; // Skip this too long buffer.
+                            // Don't break - continue processing to find delimiter
                         }
                     } else {
-                        break; // The end of buffer is reached, partial read.
+                        // Null byte encountered - enter resync mode
+                        log_error("SERIAL: null byte detected at input_pos=%d, entering resync mode. Buffer: [%s]\n",
+                                 input_pos, serial_input);
+
+                        resync_mode = 1;
+                        memset(serial_input, 0, PARA_SERIAL_INPUT_LEN);
+                        input_pos = 0;
+                        // Don't break - continue processing to find delimiter
                     }
                 }
 
