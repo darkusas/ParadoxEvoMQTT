@@ -126,6 +126,7 @@ int para_mgr_set_zone(int area_num, int zone_num)
         zones[zidx]->num = zone_num;
         zones[zidx]->area = area_num;
         zones[zidx]->bypassed = RS_OK;
+        zones[zidx]->firstreport = 1;
         
         return 0;
     } else {
@@ -161,6 +162,21 @@ int para_mgr_is_area_configured(int area_num) {
         return 0;
     }
     return areas[area_num - 1] != NULL;
+}
+
+int para_mgr_set_zone_name(int zone_num, const char *name)
+{
+    if (zone_num < 1 || zone_num > MAX_ZONES || zones[zone_num - 1] == NULL) {
+        log_error("PMGR: cannot set name for unconfigured zone %d\n", zone_num);
+        return -1;
+    }
+
+    strncpy(zones[zone_num - 1]->name, name, LABEL_LENGTH - 1);
+    zones[zone_num - 1]->name[LABEL_LENGTH - 1] = '\0';
+    zones[zone_num - 1]->name_configured = 1;
+
+    log_verbose("PMGR: zone %d name set to [%s]\n", zone_num, zones[zone_num - 1]->name);
+    return 0;
 }
 
 static void *para_mgr_thread(void *context)
@@ -766,7 +782,9 @@ static void para_process_prt3_response(char *prt3_string, void *mqtt_area_report
                 int zone_num = get_number_at_substring(prt3_string + 2, 3);
 
                 if (zone_num > 0 && zone_num < MAX_ZONES && zones[zone_num - 1] != NULL) {
-                    set_label(zones[zone_num - 1]->name, prt3_string + 5);
+                    if (zones[zone_num - 1]->name_configured == 0) {
+                        set_label(zones[zone_num - 1]->name, prt3_string + 5);
+                    }
                     log_debug("PMGR-ZL: zone label set: [%s]\n", zones[zone_num - 1]->name);
                 } else {
                     log_error("PMGR: ignoring label of zone %d\n", zone_num);
@@ -899,6 +917,7 @@ static void send_zone_report(int zone_num, void *mqtt_zone_report)
     
     // Clear the record
     zone->updated = RECORD_CLEAR;
+    zone->firstreport = 0;
 }
 
 static int get_number_at_substring(char *str, size_t length)

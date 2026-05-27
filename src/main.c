@@ -108,6 +108,7 @@ int main(int argc, char **argv)
         {"device",        required_argument, 0, 'd'},
         {"user_code",     required_argument, 0, 'u'},
         {"status_period", required_argument, 0, 'S'},
+        {"zone_name",     required_argument, 0, 'N'},
         {"help",          no_argument,       0, 'h'},
         {"verbose",       no_argument,       0, 'v'},
         {0, 0, 0, 0}
@@ -125,7 +126,7 @@ int main(int argc, char **argv)
     char *serialdevice = NULL;
 
     while(1) {
-        c = getopt_long(argc, argv, "m:p:t:l:w:ra:z:Dd:u:S:hv", long_options, &opt_idx);
+    c = getopt_long(argc, argv, "m:p:t:l:w:ra:z:N:Dd:u:S:hv", long_options, &opt_idx);
 
         if (c < 0) {
             break;
@@ -202,6 +203,21 @@ int main(int argc, char **argv)
                 }
 
                 areanum = 0;
+            break;
+
+            case 'N': {
+                char *colon = strchr(optarg, ':');
+                if (colon != NULL) {
+                    int znum = strtol(optarg, NULL, 10);
+                    if (znum > 0 && znum <= MAX_ZONES) {
+                        para_mgr_set_zone_name(znum, colon + 1);
+                    } else {
+                        log_error("PARAEVO: Zone number %d in --zone_name is not valid!\n", znum);
+                    }
+                } else {
+                    log_error("PARAEVO: --zone_name format must be N:name (e.g. --zone_name=1:VoniosPIR)\n");
+                }
+            }
             break;
 
             case 'd':

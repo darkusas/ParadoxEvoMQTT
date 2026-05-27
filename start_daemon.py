@@ -60,9 +60,23 @@ if "areas" in config:
             exit(-1)
         
         if "zones" in area:
-            args += " -z " + ",".join([str(zone) for zone in area["zones"]])
+            zone_nums = []
+            zone_name_args = []
+            for zone in area["zones"]:
+                if isinstance(zone, (int, float)):
+                    zone_nums.append(str(int(zone)))
+                elif isinstance(zone, dict) and "num" in zone:
+                    zone_nums.append(str(zone["num"]))
+                    if "name" in zone and zone["name"]:
+                        zone_name_args.append("--zone_name=" + str(zone["num"]) + ":" + str(zone["name"]))
+                else:
+                    print("Invalid zone config entry!")
+                    exit(-1)
+            args += " -z " + ",".join(zone_nums)
+            for name_arg in zone_name_args:
+                args += " " + name_arg
         else:
-            print("Aarea config dose not have zones!")
+            print("Area config does not have zones!")
             exit(-1)
 else:
     print("No area config!")
