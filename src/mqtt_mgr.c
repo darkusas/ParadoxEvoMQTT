@@ -286,7 +286,7 @@ static void mqtt_area_report(void *area_report_reader)
         area->trouble,
         area->ready,
         area->programming,
-        area->alarm,
+        (area->alarm==0)?RS_OK:area->alarm,
         area->strobe
     );
     mqtt_send(topic, payload);
@@ -317,7 +317,7 @@ static void mqtt_zone_report(void *zone_report_reader)
         zone->area,
         zone->name,
         zone->status,
-        zone->alarm,
+        (area->alarm==0)?RS_OK:area->alarm,
         zone->fire,
         zone->supervision,
         zone->battery,
