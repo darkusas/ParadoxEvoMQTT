@@ -317,7 +317,7 @@ static void mqtt_zone_report(void *zone_report_reader)
         zone->area,
         zone->name,
         zone->status,
-        (area->alarm==0)?RS_OK:area->alarm,
+        (zone->alarm==0)?RS_OK:zone->alarm,
         zone->fire,
         zone->supervision,
         zone->battery,
