@@ -27,7 +27,7 @@
 
 #define MAX_UTILITY_KEY 251
 
-#define LABEL_LENGTH 17
+#define LABEL_LENGTH 256 //17
 #define RECORD_CLEAR 0
 #define RECORD_UPDATED 1
 
