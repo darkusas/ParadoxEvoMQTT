@@ -29,7 +29,7 @@
 
 #ifdef EVO192
 #define MAX_AREAS 8
-#define MAX_ZONES 96
+#define MAX_ZONES 192
 #else
 #define MAX_AREAS 4
 #define MAX_ZONES 48
