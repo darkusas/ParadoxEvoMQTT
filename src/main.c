@@ -126,7 +126,7 @@ int main(int argc, char **argv)
     char *serialdevice = NULL;
 
     while(1) {
-    c = getopt_long(argc, argv, "m:p:t:l:w:ra:z:N:Dd:u:S:hv", long_options, &opt_idx);
+    c = getopt_long(argc, argv, "m:p:t:l:w:ra:z:Dd:u:N:S:hv", long_options, &opt_idx);
 
         if (c < 0) {
             break;
