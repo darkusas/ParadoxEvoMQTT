@@ -72,6 +72,7 @@ typedef struct {
     int num;
     int area;
     char name[LABEL_LENGTH];
+    int name_configured; // Name set by user config, do not overwrite from panel label
     mqtt_zone_state_t mqtt_state;
     char status;
     char alarm;
@@ -79,6 +80,7 @@ typedef struct {
     char supervision;
     char battery;
     char bypassed;
+    int firstreport; // On first report HA MQTT discovery is published
     int updated;
 } para_zone_t;
 

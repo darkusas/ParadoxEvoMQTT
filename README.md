@@ -81,9 +81,102 @@ To find your PRT3's path list `/dev/serial/by-id`.
 **NOTE**: not all Linux systems support this. Some embedded or custom flavours provide only `/dev/ttyUSB*`, which can be a headache to manage after system restart. But... _es la vida_.
 
 ## Use the paraevo.yaml
-Check the contents of included `paraevo.yaml` file. It provides an example of above switches changed to YAML format. Python script parses that YAML and generates appropriate command to execute, then executes it.
+Instead of passing command-line switches every time, the recommended way to configure the daemon is via a YAML file (default location `/etc/paraevo.yaml`). The Python script `start_daemon.py` reads this file, builds the equivalent command, and executes it.
 
-**NOTE**: Python script has hardcoded paths, these are expected to be present in Production running Docker image. Change according to your will.
+**NOTE**: `start_daemon.py` has hardcoded default paths (`/opt/paraevo/paraevo` for the binary, `/etc/paraevo.yaml` for the config). You can override the config path by passing it as an argument: `python3 start_daemon.py /path/to/my.yaml`. Change the binary path with the `binary_path` key inside the YAML file.
+
+### Configuration keys
+
+| Key | Required | Description |
+|-----|----------|-------------|
+| `device` | **Yes** | Path to the serial device where PRT3 is connected |
+| `binary_path` | No | Override path to the `paraevo` binary (default: `/opt/paraevo/paraevo`) |
+| `log_file` | No | Redirect daemon stdout/stderr to this file |
+| `daemon` | No | Run in background as a daemon (`true`/`false`, default `false`) |
+| `verbose` | No | Enable verbose logging (`true`/`false`, default `false`) |
+| `status_period` | No | Seconds between periodic area-status requests when idle (default: 60) |
+| `user_code` | No | Panel user code — **required for Disarm** |
+| `mqtt.server` | **Yes** | IP address or hostname of the MQTT broker |
+| `mqtt.port` | No | MQTT broker port (default: `1883`) |
+| `mqtt.login` | No | MQTT username |
+| `mqtt.password` | No | MQTT password |
+| `mqtt.retain` | No | Retain all published messages (`true`/`false`). Recommended `true` so Home Assistant knows the last state after a restart |
+| `areas` | **Yes** | List of areas/partitions to monitor (at least one required) |
+| `areas[].num` | **Yes** | Area number (1–8) |
+| `areas[].zones` | **Yes** | List of zones assigned to this area. Each zone is either a bare number or an object with `num` and optional `name` fields |
+| `zones[].num` | **Yes** | Zone number |
+| `zones[].name` | No | Human-readable zone name, used for Home Assistant MQTT auto-discovery labels |
+
+### Full annotated example
+
+```yaml
+# Path to the USB serial device where PRT3 is attached.
+# Using the stable by-id path is recommended over /dev/ttyUSB* which can change on reboot.
+device: /dev/serial/by-id/usb-PARADOX_PARADOX_APR-PRT3_a4008936-if00-port0
+
+# Optional: override path to the paraevo binary.
+# binary_path: /opt/paraevo/paraevo
+
+# Optional: write all daemon output to a log file.
+log_file: /var/log/paraevo.log
+
+# Optional: run the daemon in the background.
+daemon: false
+
+# Optional: print verbose output (useful for debugging).
+verbose: true
+
+# Optional: how often (in seconds) to poll area status when there is no panel activity.
+status_period: 60
+
+# MQTT broker connection settings.
+mqtt:
+  server: 192.168.1.100   # IP or hostname of your MQTT broker
+  port: 1883               # default MQTT port
+  login: mqtt_user         # MQTT username (omit if broker has no auth)
+  password: mqtt_password  # MQTT password (omit if broker has no auth)
+  retain: true             # retain last known state so HA survives restarts
+
+# Panel user code. Only strictly required for the Disarm command.
+user_code: "1234"
+
+# Areas (partitions) and their zones.
+# Each area becomes a separate alarm_control_panel entity in Home Assistant.
+# Zone names appear as labels in HA MQTT auto-discovery.
+areas:
+  - num: 1                  # Area / partition 1
+    zones:
+      - num: 1
+        name: "HallwayPIR"
+      - num: 2
+        name: "LivingRoomPIR"
+      - num: 3
+        name: "BedroomPIR"
+      - num: 4
+        name: "KitchenDoor"
+      - num: 5
+        name: "GarageDoor"
+      - num: 6
+        name: "BasementWindow"
+
+  - num: 2                  # Area / partition 2 (e.g. garage / outbuilding)
+    zones:
+      - num: 10
+        name: "PerimeterFence"
+      - num: 11
+        name: "OutdoorMotion"
+```
+
+The generated command for the above example would be equivalent to:
+```
+/opt/paraevo/paraevo -v -d /dev/serial/by-id/... \
+  --mqtt_server=192.168.1.100 --mqtt_port=1883 \
+  --mqtt_login=mqtt_user --mqtt_password=mqtt_password -r \
+  -u 1234 \
+  -a 1 -z 1,2,3,4,5,6 --zone_name=1:HallwayPIR --zone_name=2:LivingRoomPIR ... \
+  -a 2 -z 10,11 --zone_name=10:PerimeterFence --zone_name=11:OutdoorMotion \
+  -S 60 >> /var/log/paraevo.log 2>&1
+```
 
 # Configuration of PRT3
 Module should be configured to 57600 baud and ASCII mode.

@@ -46,6 +46,8 @@ int para_mgr_set_area(int);
 
 int para_mgr_set_zone(int, int);
 
+int para_mgr_set_zone_name(int, const char *);
+
 pthread_t para_mgr_start(void*);
 
 void para_mgr_clean();

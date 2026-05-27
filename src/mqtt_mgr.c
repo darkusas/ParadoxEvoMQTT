@@ -36,6 +36,7 @@ extern para_evo_config_t config;
 #define UTILITY_KEY_TOPIC "%s/utilitykey"
 
 #define ZONE_STATUS_TOPIC MAIN_AREA_TOPIC "/zone/%d"
+#define ZONE_NAME_TOPIC MAIN_AREA_TOPIC "/zone/%d/name"
 #define ZONE_ALARM_TOPIC MAIN_AREA_TOPIC "/zone/%d/alarm"
 #define ZONE_STATE_TOPIC MAIN_AREA_TOPIC "/zone/%d/state"
 #define ZONE_STATE_JSON "{" \
@@ -49,6 +50,21 @@ extern para_evo_config_t config;
     "\"battery\": \"%c\"," \
     "\"bypassed\": \"%c\"" \
 "}"
+
+#define HA_DISCOVERY_TOPIC "homeassistant/binary_sensor/paraevo_Z%d/config"
+#define HA_DISCOVERY_JSON "{" \
+    "\"name\": \"Z%d-%s\"," \
+    "\"state_topic\": \"%s/area/%d/zone/%d\"," \
+    "\"payload_on\": \"True\"," \
+    "\"payload_off\": \"False\"," \
+    "\"availability_topic\": \"%s/daemon\"," \
+    "\"payload_available\": \"online\"," \
+    "\"payload_not_available\": \"offline\"," \
+    "\"unique_id\": \"paraevo_Z%d\"" \
+"}"
+
+#define HA_DISCOVERY_TOPIC_SIZE 128
+#define HA_DISCOVERY_PAYLOAD_SIZE 512
 
 #define DAEMON_ONLINE "online"
 #define DAEMON_OFFLINE "offline"
@@ -75,8 +91,8 @@ static const char *mqp_states[] = {
 };
 
 static const char *mqz_states[] = {
-    "off",
-    "on",
+    "False",
+    "True",
 };
 
 static MQTTAsync client;
@@ -86,6 +102,7 @@ static void mqtt_start();
 static void mqtt_area_report(void *area_report_reader);
 static void mqtt_zone_report(void *zone_report_reader);
 static void mqtt_send(const char *topic, const char *payload);
+static void mqtt_send_retained(const char *topic, const char *payload);
 static void mqtt_send_lwt();
 static void mqtt_stop();
 
@@ -312,6 +329,9 @@ static void mqtt_zone_report(void *zone_report_reader)
     snprintf(topic, TOPIC_SIZE, ZONE_ALARM_TOPIC, config.mqtt_topic, zone->area, zone->num);
     mqtt_send(topic, alarm_state);
 
+    snprintf(topic, TOPIC_SIZE, ZONE_NAME_TOPIC, config.mqtt_topic, zone->area, zone->num);
+    mqtt_send(topic, zone->name);
+
     snprintf(topic, TOPIC_SIZE, ZONE_STATE_TOPIC, config.mqtt_topic, zone->area, zone->num);
     snprintf(payload, PAYLOAD_SIZE, ZONE_STATE_JSON,
         zone->num,
@@ -326,6 +346,22 @@ static void mqtt_zone_report(void *zone_report_reader)
     );
     // log_debug("MMGR: zone status: %s\n", payload);
     mqtt_send(topic, payload);
+
+    if (zone->firstreport) {
+        char ha_topic[HA_DISCOVERY_TOPIC_SIZE];
+        char ha_payload[HA_DISCOVERY_PAYLOAD_SIZE];
+        const char *display_name = (zone->name[0] != '\0') ? zone->name : "Unknown";
+
+        snprintf(ha_topic, sizeof(ha_topic), HA_DISCOVERY_TOPIC, zone->num);
+        snprintf(ha_payload, sizeof(ha_payload), HA_DISCOVERY_JSON,
+            zone->num, display_name,
+            config.mqtt_topic, zone->area, zone->num,
+            config.mqtt_topic,
+            zone->num
+        );
+        mqtt_send_retained(ha_topic, ha_payload);
+        log_info("MMGR: published HA discovery for zone %d (%s)\n", zone->num, display_name);
+    }
 
     free(zone);
 }
@@ -495,6 +531,17 @@ static void mqtt_send(const char *topic, const char *payload)
     msg.payloadlen = strlen(msg.payload);
     msg.qos = 1;
     msg.retained = config.mqtt_retain;
+
+    MQTTAsync_sendMessage(client, topic, &msg, NULL);
+}
+
+static void mqtt_send_retained(const char *topic, const char *payload)
+{
+    MQTTAsync_message msg = MQTTAsync_message_initializer;
+    msg.payload = (char *) payload;
+    msg.payloadlen = strlen(msg.payload);
+    msg.qos = 1;
+    msg.retained = 1;
 
     MQTTAsync_sendMessage(client, topic, &msg, NULL);
 }
