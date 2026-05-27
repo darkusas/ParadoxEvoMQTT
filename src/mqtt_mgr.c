@@ -319,9 +319,9 @@ static void mqtt_zone_report(void *zone_report_reader)
         zone->status,
         (zone->alarm==0)?RS_OK:zone->alarm, 
         (zone->fire==0)?RS_OK:zone->fire,
-        zone->supervision,
-        zone->battery,
-        zone->bypassed
+        (zone->supervision==0)?RS_OK:zone->supervision,
+        (zone->battery==0)?RS_OK:zone->battery,
+        (zone->bypassed==0)?RS_OK:zone->bypassed   
     );
     // log_debug("MMGR: zone status: %s\n", payload);
     mqtt_send(topic, payload);
