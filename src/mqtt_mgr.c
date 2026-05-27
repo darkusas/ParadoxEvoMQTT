@@ -303,7 +303,8 @@ static void mqtt_zone_report(void *zone_report_reader)
         return;
     }
 
-    const char *zone_state = mqz_states[zone->mqtt_state];
+    //const char *zone_state = mqz_states[zone->mqtt_state];
+    const char *zone_state = (zone->status==RS_ZONE_CLOSED)?mqz_states[0]:mqz_states[1];
     snprintf(topic, TOPIC_SIZE, ZONE_STATUS_TOPIC, config.mqtt_topic, zone->area, zone->num);
     mqtt_send(topic, zone_state);
 
