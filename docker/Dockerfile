@@ -46,7 +46,7 @@ RUN apt-get update \
 RUN mkdir -p /opt/paraevo
 
 COPY --from=builder /src/paraevo /opt/paraevo/paraevo
-COPY start_daemon.py /opt/paraevo/start_daemon.py
+COPY --from=builder /src/start_daemon.py /opt/paraevo/start_daemon.py
 
 RUN chmod +x /opt/paraevo/start_daemon.py
 
