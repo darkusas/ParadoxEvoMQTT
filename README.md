@@ -220,6 +220,8 @@ alarm_control_panel:
 Zone auto-discovery messages are published to:
 `homeassistant/binary_sensor/paraevo_Z<zone_number>/config`
 
+Discovered zone entities are published with `device_class: motion`, so Home Assistant treats them as motion sensors by default.
+
 To add auto-discovered sensors in Home Assistant:
 1. In Home Assistant, add/configure the MQTT integration (`Settings -> Devices & Services -> Add Integration -> MQTT`).
 2. In `paraevo.yaml`, set `mqtt.retain: true` (recommended for stable discovery/state after restarts).

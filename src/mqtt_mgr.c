@@ -57,6 +57,7 @@ extern para_evo_config_t config;
     "\"state_topic\": \"%s/area/%d/zone/%d\"," \
     "\"payload_on\": \"True\"," \
     "\"payload_off\": \"False\"," \
+    "\"device_class\": \"motion\"," \
     "\"availability_topic\": \"%s/daemon\"," \
     "\"payload_available\": \"online\"," \
     "\"payload_not_available\": \"offline\"," \
