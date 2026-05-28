@@ -187,8 +187,8 @@ The generated command for the above example would be equivalent to:
   --mqtt_server=192.168.1.100 --mqtt_port=1883 \
   --mqtt_login=mqtt_user --mqtt_password=mqtt_password -r \
   -u 1234 \
-  -a 1 --zone_name=1:HallwayPIR --zone_device_class=1:motion -z 1,2,3,4,5,6 ... \
-  -a 2 --zone_name=10:PerimeterFence --zone_entity_category=10:diagnostic --zone_icon=10:mdi:shield-home -z 10,11 ... \
+  -a 1 -z 1,2,3,4,5,6 --zone_name=1:HallwayPIR --zone_device_class=1:motion ... \
+  -a 2 -z 10,11 --zone_name=10:PerimeterFence --zone_entity_category=10:diagnostic --zone_icon=10:mdi:shield-home ... \
   -S 60
 ```
 
