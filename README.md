@@ -216,6 +216,18 @@ alarm_control_panel:
 
 ```
 
+## Home Assistant MQTT Auto-discovery
+Zone auto-discovery messages are published to:
+`homeassistant/binary_sensor/paraevo_Z<zone_number>/config`
+
+To add auto-discovered sensors in Home Assistant:
+1. In Home Assistant, add/configure the MQTT integration (`Settings -> Devices & Services -> Add Integration -> MQTT`).
+2. In `paraevo.yaml`, set `mqtt.retain: true` (recommended for stable discovery/state after restarts).
+3. Start/restart ParadoxEvoMQTT.
+4. Home Assistant will automatically create `binary_sensor` entities for all configured zones from your `areas[].zones` configuration.
+
+No manual `binary_sensor` YAML is required for discovered zones.
+
 ## Zone Topics
 Each zone has a topic `darauble/paraevo/area/1/zone/1`. If sensor is off, the reported payload is `off`. It is set to `on` if zone:
 * is open

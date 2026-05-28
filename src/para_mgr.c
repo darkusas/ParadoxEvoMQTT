@@ -164,6 +164,29 @@ int para_mgr_is_area_configured(int area_num) {
     return areas[area_num - 1] != NULL;
 }
 
+int para_mgr_is_zone_configured(int zone_num) {
+    if (zone_num < 1 || zone_num > MAX_ZONES) {
+        return 0;
+    }
+    return zones[zone_num - 1] != NULL;
+}
+
+int para_mgr_get_zone_area(int zone_num)
+{
+    if (zone_num < 1 || zone_num > MAX_ZONES || zones[zone_num - 1] == NULL) {
+        return 0;
+    }
+    return zones[zone_num - 1]->area;
+}
+
+const char *para_mgr_get_zone_name(int zone_num)
+{
+    if (zone_num < 1 || zone_num > MAX_ZONES || zones[zone_num - 1] == NULL) {
+        return NULL;
+    }
+    return zones[zone_num - 1]->name;
+}
+
 int para_mgr_set_zone_name(int zone_num, const char *name)
 {
     if (zone_num < 1 || zone_num > MAX_ZONES || zones[zone_num - 1] == NULL) {
