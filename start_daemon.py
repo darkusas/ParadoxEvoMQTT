@@ -1,96 +1,162 @@
-#!/usr/bin/python3
-import yaml
+#!/usr/bin/env python3
+
 import os
+import subprocess
 import sys
+from pathlib import Path
 
-binary_path = "/opt/paraevo/paraevo"
-config_file = "/etc/paraevo.yaml"
+import yaml
 
-if len(sys.argv) > 1:
-    config_file = sys.argv[1]
 
-with open(config_file, "r") as f:
-    config = yaml.load(f, Loader=yaml.FullLoader)
+def _as_bool(value, default=False):
+    if value is None:
+        return default
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return bool(value)
+    if isinstance(value, str):
+        return value.strip().lower() in {"1", "true", "yes", "y", "on"}
+    return default
 
-if "binary_path" in config:
-    binary_path = config["binary_path"]
 
-args = binary_path
+def _load_config(path: str) -> dict:
+    config_path = Path(path)
+    if not config_path.exists():
+        raise FileNotFoundError(f"Config file not found: {config_path}")
 
-if "verbose" in config and config["verbose"] == True:
-    args += " -v"
+    with config_path.open("r", encoding="utf-8") as f:
+        data = yaml.safe_load(f)
 
-if "daemon" in config and config["daemon"] == True:
-    args += " -D"
+    if not isinstance(data, dict):
+        raise ValueError("Config root must be a YAML mapping")
 
-if "device" in config:
-    args += " -d " + config["device"]
-else:
-    print("Device not present in config!")
-    exit(-1)
+    return data
 
-if "mqtt" in config:
-    if "server" in config["mqtt"]:
-        args += " --mqtt_server=" + config["mqtt"]["server"]
-    else:
-        print("No MQTT server in config!")
-    
-    if "port" in config["mqtt"]:
-        args += " --mqtt_port=" + str(config["mqtt"]["port"])
-    
-    if "login" in config["mqtt"]:
-        args += " --mqtt_login=" + config["mqtt"]["login"]
-    
-    if "password" in config["mqtt"]:
-        args += " --mqtt_password=" + config["mqtt"]["password"]
-    
-    if "retain" in config["mqtt"] and config["mqtt"]["retain"] == True:
-        args += " -r"
 
-else:
-    print("No MQTT settings in config!")
-    exit(-1)
+def _zone_num(zone) -> int:
+    if isinstance(zone, int):
+        return zone
+    if isinstance(zone, dict) and "num" in zone:
+        return int(zone["num"])
+    raise ValueError(f"Invalid zone entry: {zone!r}")
 
-if "areas" in config:
-    for area in config["areas"]:
-        if "num" in area:
-            args += " -a " + str(area["num"])
-        else:
-            print("Area config does not have \"num\"!")
-            exit(-1)
-        
-        if "zones" in area:
-            zone_nums = []
-            zone_name_args = []
-            for zone in area["zones"]:
-                if isinstance(zone, (int, float)):
-                    zone_nums.append(str(int(zone)))
-                elif isinstance(zone, dict) and "num" in zone:
-                    zone_nums.append(str(zone["num"]))
-                    if "name" in zone and zone["name"]:
-                        zone_name_args.append("--zone_name=" + str(zone["num"]) + ":" + str(zone["name"]))
-                else:
-                    print("Invalid zone config entry!")
-                    exit(-1)
-            args += " -z " + ",".join(zone_nums)
-            for name_arg in zone_name_args:
-                args += " " + name_arg
-        else:
-            print("Area config does not have zones!")
-            exit(-1)
-else:
-    print("No area config!")
-    exit(-1)
 
-if "user_code" in config and config["user_code"] != "":
-    args += " -u " + config["user_code"]
+def _zone_name(zone) -> str | None:
+    if isinstance(zone, dict):
+        name = zone.get("name")
+        if name is None:
+            return None
+        name = str(name)
+        return name
+    return None
 
-if "status_period" in config:
-    args += " -S " + str(config["status_period"])
 
-if "log_file" in config:
-    args += " >> " + config["log_file"] + " 2>&1"
+def build_args(cfg: dict) -> list[str]:
+    device = cfg.get("device")
+    if not device:
+        raise ValueError("Missing required key: device")
 
-print("The final command:")
-print(args)
-os.system(args)
+    binary_path = str(cfg.get("binary_path") or "/opt/paraevo/paraevo")
+
+    args: list[str] = [binary_path]
+
+    if _as_bool(cfg.get("verbose"), default=False):
+        args.append("-v")
+
+    args.extend(["-d", str(device)])
+
+    mqtt = cfg.get("mqtt") or {}
+    if not isinstance(mqtt, dict):
+        raise ValueError("mqtt must be a mapping")
+
+    mqtt_server = mqtt.get("server")
+    if not mqtt_server:
+        raise ValueError("Missing required key: mqtt.server")
+
+    args.append(f"--mqtt_server={mqtt_server}")
+
+    mqtt_port = mqtt.get("port")
+    if mqtt_port is not None:
+        args.append(f"--mqtt_port={int(mqtt_port)}")
+
+    mqtt_login = mqtt.get("login")
+    if mqtt_login:
+        args.append(f"--mqtt_login={mqtt_login}")
+
+    mqtt_password = mqtt.get("password")
+    if mqtt_password:
+        args.append(f"--mqtt_password={mqtt_password}")
+
+    if _as_bool(mqtt.get("retain"), default=False):
+        args.append("-r")
+
+    user_code = cfg.get("user_code")
+    if user_code is not None and str(user_code) != "":
+        args.extend(["-u", str(user_code)])
+
+    areas = cfg.get("areas")
+    if not isinstance(areas, list) or not areas:
+        raise ValueError("areas must be a non-empty list")
+
+    for area in areas:
+        if not isinstance(area, dict) or "num" not in area:
+            raise ValueError(f"Invalid area entry: {area!r}")
+
+        area_num = int(area["num"])
+        zones = area.get("zones")
+        if not isinstance(zones, list) or not zones:
+            raise ValueError(f"Area {area_num} has no zones list")
+
+        zone_numbers = [str(_zone_num(z)) for z in zones]
+
+        args.extend(["-a", str(area_num), "-z", ",".join(zone_numbers)])
+
+        for z in zones:
+            zn = _zone_num(z)
+            name = _zone_name(z)
+            if name is None:
+                continue
+            if name == "":
+                continue
+            args.append(f"--zone_name={zn}:{name}")
+
+    status_period = cfg.get("status_period")
+    if status_period is not None:
+        args.extend(["-S", str(int(status_period))])
+
+    return args
+
+
+def main() -> int:
+    cfg_path = sys.argv[1] if len(sys.argv) > 1 else "/etc/paraevo.yaml"
+    cfg = _load_config(cfg_path)
+
+    args = build_args(cfg)
+
+    # Logging redirection (append). If not set, inherit container stdout/stderr.
+    log_file = cfg.get("log_file")
+    if log_file:
+        log_path = Path(str(log_file))
+        log_path.parent.mkdir(parents=True, exist_ok=True)
+        with log_path.open("a", encoding="utf-8") as f:
+            print("The final command:")
+            print(" ".join(args))
+            f.write("The final command:\n")
+            f.write(" ".join(args) + "\n")
+            f.flush()
+            proc = subprocess.run(args, stdout=f, stderr=subprocess.STDOUT)
+            return int(proc.returncode)
+
+    print("The final command:")
+    print(" ".join(args))
+    proc = subprocess.run(args)
+    return int(proc.returncode)
+
+
+if __name__ == "__main__":
+    try:
+        raise SystemExit(main())
+    except Exception as e:
+        print(f"start_daemon.py error: {e}", file=sys.stderr)
+        raise
