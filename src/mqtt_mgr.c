@@ -55,6 +55,7 @@ extern para_evo_config_t config;
 
 #define HA_DISCOVERY_TOPIC_SIZE 128
 #define HA_DISCOVERY_PAYLOAD_SIZE 512
+#define MIN_JSON_FALLBACK_SIZE 3
 
 #define DAEMON_ONLINE "online"
 #define DAEMON_OFFLINE "offline"
@@ -558,9 +559,10 @@ static void mqtt_build_ha_discovery_payload(
 )
 {
     size_t offset = 0;
+    int written = 0;
     const char *resolved_device_class = (device_class && device_class[0] != '\0') ? device_class : "motion";
 
-    offset += snprintf(
+    written = snprintf(
         dst + offset,
         dst_size - offset,
         "{"
@@ -574,30 +576,50 @@ static void mqtt_build_ha_discovery_payload(
         config.mqtt_topic, area_num, zone_num,
         resolved_device_class
     );
+    if (written < 0 || (size_t)written >= dst_size - offset) {
+        goto TRUNCATED;
+    }
+    offset += (size_t)written;
 
     if (entity_category && entity_category[0] != '\0' && offset < dst_size) {
-        offset += snprintf(dst + offset, dst_size - offset, ",\"entity_category\": \"%s\"", entity_category);
+        written = snprintf(dst + offset, dst_size - offset, ",\"entity_category\": \"%s\"", entity_category);
+        if (written < 0 || (size_t)written >= dst_size - offset) {
+            goto TRUNCATED;
+        }
+        offset += (size_t)written;
     }
 
     if (icon && icon[0] != '\0' && offset < dst_size) {
-        offset += snprintf(dst + offset, dst_size - offset, ",\"icon\": \"%s\"", icon);
+        written = snprintf(dst + offset, dst_size - offset, ",\"icon\": \"%s\"", icon);
+        if (written < 0 || (size_t)written >= dst_size - offset) {
+            goto TRUNCATED;
+        }
+        offset += (size_t)written;
     }
 
-    if (offset < dst_size) {
-        snprintf(
-            dst + offset,
-            dst_size - offset,
-            ","
-                "\"availability_topic\": \"%s/daemon\","
-                "\"payload_available\": \"online\","
-                "\"payload_not_available\": \"offline\","
-                "\"unique_id\": \"paraevo_Z%d\""
-            "}",
-            config.mqtt_topic,
-            zone_num
-        );
-    } else {
-        dst[dst_size - 1] = '\0';
+    written = snprintf(
+        dst + offset,
+        dst_size - offset,
+        ","
+            "\"availability_topic\": \"%s/daemon\","
+            "\"payload_available\": \"online\","
+            "\"payload_not_available\": \"offline\","
+            "\"unique_id\": \"paraevo_Z%d\""
+        "}",
+        config.mqtt_topic,
+        zone_num
+    );
+    if (written < 0 || (size_t)written >= dst_size - offset) {
+        goto TRUNCATED;
+    }
+    return;
+
+TRUNCATED:
+    log_error("MMGR: HA discovery payload truncated for zone %d, sending fallback payload\n", zone_num);
+    if (dst_size >= MIN_JSON_FALLBACK_SIZE) {
+        snprintf(dst, dst_size, "{}");
+    } else if (dst_size > 0) {
+        dst[0] = '\0';
     }
 }
 

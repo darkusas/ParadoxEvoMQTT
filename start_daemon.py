@@ -1,8 +1,8 @@
 #!/usr/bin/python3
 import os
-import shlex
 import subprocess
 import sys
+import tempfile
 
 import yaml
 
@@ -18,26 +18,40 @@ def append_with_limit(path, data, max_size_bytes):
     log_dir = os.path.dirname(path)
     if log_dir:
         os.makedirs(log_dir, exist_ok=True)
+    target_dir = log_dir if log_dir else "."
+
+    def write_atomic(content):
+        fd, temp_path = tempfile.mkstemp(dir=target_dir, prefix=".paraevo-log-", suffix=".tmp")
+        try:
+            with os.fdopen(fd, "wb") as f:
+                f.write(content)
+            os.replace(temp_path, path)
+        finally:
+            if os.path.exists(temp_path):
+                os.unlink(temp_path)
 
     existing_size = os.path.getsize(path) if os.path.exists(path) else 0
     if len(data) >= max_size_bytes:
-        with open(path, "wb") as f:
-            f.write(data[-max_size_bytes:])
+        write_atomic(data[-max_size_bytes:])
         return
 
     if existing_size + len(data) <= max_size_bytes:
-        with open(path, "ab") as f:
-            f.write(data)
+        try:
+            with open(path, "ab") as f:
+                f.write(data)
+        except OSError:
+            write_atomic(data)
         return
 
     keep = max_size_bytes - len(data)
     with open(path, "rb") as f:
-        tail = f.read()[-keep:] if keep > 0 else b""
+        if keep > 0:
+            f.seek(max(existing_size - keep, 0))
+            tail = f.read(keep)
+        else:
+            tail = b""
 
-    with open(path, "wb") as f:
-        if tail:
-            f.write(tail)
-        f.write(data)
+    write_atomic(tail + data)
 
 
 def parse_zone_entry(zone):
@@ -65,8 +79,8 @@ with open(config_file, "r") as f:
 binary_path = config.get("binary_path", DEFAULT_BINARY_PATH)
 args = [binary_path]
 
-full_log = bool(config.get("log", False) or config.get("verbose", False))
-if full_log:
+enable_full_logging = bool(config.get("log", False) or config.get("verbose", False))
+if enable_full_logging:
     args.append("-v")
 
 if config.get("daemon") is True:
@@ -141,7 +155,7 @@ if "status_period" in config:
     args.extend(["-S", str(config["status_period"])])
 
 print("The final command:")
-print(" ".join(shlex.quote(arg) for arg in args))
+print("(hidden for security)")
 
 log_file = config.get("log_file")
 log_max_size_mb = config.get("log_max_size_mb", DEFAULT_LOG_MAX_SIZE_MB)

@@ -45,6 +45,7 @@
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
+#include <errno.h>
 #include <getopt.h>
 #include <sys/types.h>
 #include <pthread.h>
@@ -429,12 +430,26 @@ void print_usage()
 static void parse_zone_attr(const char *optarg, int (*setter)(int, const char *), const char *opt_name)
 {
     const char *value = strchr(optarg, ':');
+    char *endptr = NULL;
+    long parsed_zone = 0;
     if (value == NULL) {
         log_error("PARAEVO: %s format must be N:value (e.g. %s=1:motion)\n", opt_name, opt_name);
         return;
     }
 
-    int znum = strtol(optarg, NULL, 10);
+    errno = 0;
+    parsed_zone = strtol(optarg, &endptr, 10);
+    if (errno == ERANGE) {
+        log_error("PARAEVO: Zone number in %s is out of numeric range\n", opt_name);
+        return;
+    }
+    if (endptr == optarg || *endptr != ':') {
+        log_error("PARAEVO: %s has invalid zone number format, expected N:value\n", opt_name);
+        return;
+    }
+
+    int znum = (int)parsed_zone;
+
     if (znum < 1 || znum > MAX_ZONES) {
         log_error("PARAEVO: Zone number %d in %s is not valid!\n", znum, opt_name);
         return;
