@@ -68,9 +68,9 @@ def _zone_attrs(zone) -> dict[str, str]:
     return attrs
 
 
-def _maybe_trim_log_file(log_path: Path, max_size_mb_value) -> None:
+def _maybe_trim_log_file(log_path: Path, max_size_mb) -> None:
     try:
-        max_size_mb = int(max_size_mb_value) if max_size_mb_value is not None else 10
+        max_size_mb = int(max_size_mb) if max_size_mb is not None else 10
     except (TypeError, ValueError):
         raise ValueError("log_max_size_mb must be an integer")
 
@@ -80,7 +80,16 @@ def _maybe_trim_log_file(log_path: Path, max_size_mb_value) -> None:
     max_size_bytes = max_size_mb * 1024 * 1024
 
     if log_path.exists() and log_path.stat().st_size > max_size_bytes:
-        log_path.write_text("", encoding="utf-8")
+        with log_path.open("rb") as f:
+            f.seek(-max_size_bytes, os.SEEK_END)
+            tail = f.read()
+
+        first_newline = tail.find(b"\n")
+        if first_newline >= 0 and first_newline + 1 < len(tail):
+            tail = tail[first_newline + 1:]
+
+        with log_path.open("wb") as f:
+            f.write(tail)
 
 
 def build_args(cfg: dict) -> list[str]:
@@ -149,9 +158,7 @@ def build_args(cfg: dict) -> list[str]:
         for z in zones:
             zn = _zone_num(z)
             name = _zone_name(z)
-            if name is None:
-                pass
-            elif name != "":
+            if name is not None and name != "":
                 args.append(f"--zone_name={zn}:{name}")
 
             attrs = _zone_attrs(z)
