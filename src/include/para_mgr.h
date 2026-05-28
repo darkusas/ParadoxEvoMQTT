@@ -53,5 +53,8 @@ pthread_t para_mgr_start(void*);
 void para_mgr_clean();
 
 int para_mgr_is_area_configured(int);
+int para_mgr_is_zone_configured(int);
+int para_mgr_get_zone_area(int);
+const char *para_mgr_get_zone_name(int);
 
 #endif /* PARA_MGR_H */

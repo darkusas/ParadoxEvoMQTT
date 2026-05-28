@@ -104,6 +104,7 @@ static void mqtt_zone_report(void *zone_report_reader);
 static void mqtt_send(const char *topic, const char *payload);
 static void mqtt_send_retained(const char *topic, const char *payload);
 static void mqtt_send_lwt();
+static void mqtt_publish_ha_discovery_for_configured_zones();
 static void mqtt_stop();
 
 static void onConnect(void* context, MQTTAsync_successData* response);
@@ -475,6 +476,8 @@ static void onConnect(void* context, MQTTAsync_successData* response)
             }
         }
     }
+
+    mqtt_publish_ha_discovery_for_configured_zones();
 }
 
 static void onConnectFailure(void* context, MQTTAsync_failureData* response)
@@ -511,6 +514,34 @@ static void onSubscribe(void* context, MQTTAsync_successData* response)
 static void onSubscribeFailure(void* context, MQTTAsync_failureData* response)
 {
         log_error("MMGR: MQTT subscription failed: [%d] - %s\n", response->code, response->message);
+}
+
+static void mqtt_publish_ha_discovery_for_configured_zones()
+{
+    for (int i = 1; i <= MAX_ZONES; i++) {
+        if (!para_mgr_is_zone_configured(i)) {
+            continue;
+        }
+
+        int area = para_mgr_get_zone_area(i);
+        if (area < 1 || area > MAX_AREAS) {
+            continue;
+        }
+
+        const char *zone_name = para_mgr_get_zone_name(i);
+        const char *display_name = (zone_name && zone_name[0] != '\0') ? zone_name : "Unknown";
+        char ha_topic[HA_DISCOVERY_TOPIC_SIZE];
+        char ha_payload[HA_DISCOVERY_PAYLOAD_SIZE];
+
+        snprintf(ha_topic, sizeof(ha_topic), HA_DISCOVERY_TOPIC, i);
+        snprintf(ha_payload, sizeof(ha_payload), HA_DISCOVERY_JSON,
+            i, display_name,
+            config.mqtt_topic, area, i,
+            config.mqtt_topic,
+            i
+        );
+        mqtt_send_retained(ha_topic, ha_payload);
+    }
 }
 
 static void mqtt_send_lwt()
