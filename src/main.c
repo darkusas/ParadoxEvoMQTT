@@ -448,12 +448,12 @@ static void parse_zone_attr(const char *optarg, int (*setter)(int, const char *)
         return;
     }
 
-    int znum = (int)parsed_zone;
-
-    if (znum < 1 || znum > MAX_ZONES) {
-        log_error("PARAEVO: Zone number %d in %s is not valid!\n", znum, opt_name);
+    if (parsed_zone < 1 || parsed_zone > MAX_ZONES) {
+        log_error("PARAEVO: Zone number %ld in %s is not valid!\n", parsed_zone, opt_name);
         return;
     }
+
+    int znum = (int)parsed_zone;
 
     setter(znum, value + 1);
 }
