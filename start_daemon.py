@@ -1,51 +1,100 @@
 #!/usr/bin/python3
-import yaml
 import os
+import shlex
+import subprocess
 import sys
 
-binary_path = "/opt/paraevo/paraevo"
-config_file = "/etc/paraevo.yaml"
+import yaml
 
+DEFAULT_BINARY_PATH = "/opt/paraevo/paraevo"
+DEFAULT_CONFIG_FILE = "/etc/paraevo.yaml"
+DEFAULT_LOG_MAX_SIZE_MB = 10
+
+
+def append_with_limit(path, data, max_size_bytes):
+    if max_size_bytes <= 0:
+        max_size_bytes = DEFAULT_LOG_MAX_SIZE_MB * 1024 * 1024
+
+    log_dir = os.path.dirname(path)
+    if log_dir:
+        os.makedirs(log_dir, exist_ok=True)
+
+    existing_size = os.path.getsize(path) if os.path.exists(path) else 0
+    if len(data) >= max_size_bytes:
+        with open(path, "wb") as f:
+            f.write(data[-max_size_bytes:])
+        return
+
+    if existing_size + len(data) <= max_size_bytes:
+        with open(path, "ab") as f:
+            f.write(data)
+        return
+
+    keep = max_size_bytes - len(data)
+    with open(path, "rb") as f:
+        tail = f.read()[-keep:] if keep > 0 else b""
+
+    with open(path, "wb") as f:
+        if tail:
+            f.write(tail)
+        f.write(data)
+
+
+def parse_zone_entry(zone):
+    if isinstance(zone, (int, float)):
+        return int(zone), {}
+
+    if isinstance(zone, dict) and "num" in zone:
+        meta = {}
+        for key in ("name", "device_class", "entity_category", "icon"):
+            value = zone.get(key)
+            if value is not None and value != "":
+                meta[key] = str(value)
+        return int(zone["num"]), meta
+
+    raise ValueError("Invalid zone config entry!")
+
+
+config_file = DEFAULT_CONFIG_FILE
 if len(sys.argv) > 1:
     config_file = sys.argv[1]
 
 with open(config_file, "r") as f:
     config = yaml.load(f, Loader=yaml.FullLoader)
 
-if "binary_path" in config:
-    binary_path = config["binary_path"]
+binary_path = config.get("binary_path", DEFAULT_BINARY_PATH)
+args = [binary_path]
 
-args = binary_path
+full_log = bool(config.get("log", False) or config.get("verbose", False))
+if full_log:
+    args.append("-v")
 
-if "verbose" in config and config["verbose"] == True:
-    args += " -v"
-
-if "daemon" in config and config["daemon"] == True:
-    args += " -D"
+if config.get("daemon") is True:
+    args.append("-D")
 
 if "device" in config:
-    args += " -d " + config["device"]
+    args.extend(["-d", str(config["device"])])
 else:
     print("Device not present in config!")
     exit(-1)
 
 if "mqtt" in config:
     if "server" in config["mqtt"]:
-        args += " --mqtt_server=" + config["mqtt"]["server"]
+        args.append("--mqtt_server=" + str(config["mqtt"]["server"]))
     else:
         print("No MQTT server in config!")
-    
+
     if "port" in config["mqtt"]:
-        args += " --mqtt_port=" + str(config["mqtt"]["port"])
-    
+        args.append("--mqtt_port=" + str(config["mqtt"]["port"]))
+
     if "login" in config["mqtt"]:
-        args += " --mqtt_login=" + config["mqtt"]["login"]
-    
+        args.append("--mqtt_login=" + str(config["mqtt"]["login"]))
+
     if "password" in config["mqtt"]:
-        args += " --mqtt_password=" + config["mqtt"]["password"]
-    
-    if "retain" in config["mqtt"] and config["mqtt"]["retain"] == True:
-        args += " -r"
+        args.append("--mqtt_password=" + str(config["mqtt"]["password"]))
+
+    if config["mqtt"].get("retain") is True:
+        args.append("-r")
 
 else:
     print("No MQTT settings in config!")
@@ -54,27 +103,30 @@ else:
 if "areas" in config:
     for area in config["areas"]:
         if "num" in area:
-            args += " -a " + str(area["num"])
+            args.extend(["-a", str(area["num"])])
         else:
             print("Area config does not have \"num\"!")
             exit(-1)
-        
+
         if "zones" in area:
             zone_nums = []
-            zone_name_args = []
             for zone in area["zones"]:
-                if isinstance(zone, (int, float)):
-                    zone_nums.append(str(int(zone)))
-                elif isinstance(zone, dict) and "num" in zone:
-                    zone_nums.append(str(zone["num"]))
-                    if "name" in zone and zone["name"]:
-                        zone_name_args.append("--zone_name=" + str(zone["num"]) + ":" + str(zone["name"]))
-                else:
-                    print("Invalid zone config entry!")
+                try:
+                    zone_num, meta = parse_zone_entry(zone)
+                except ValueError as exc:
+                    print(str(exc))
                     exit(-1)
-            args += " -z " + ",".join(zone_nums)
-            for name_arg in zone_name_args:
-                args += " " + name_arg
+
+                zone_nums.append(str(zone_num))
+                if "name" in meta:
+                    args.append(f"--zone_name={zone_num}:{meta['name']}")
+                if "device_class" in meta:
+                    args.append(f"--zone_device_class={zone_num}:{meta['device_class']}")
+                if "entity_category" in meta:
+                    args.append(f"--zone_entity_category={zone_num}:{meta['entity_category']}")
+                if "icon" in meta:
+                    args.append(f"--zone_icon={zone_num}:{meta['icon']}")
+            args.extend(["-z", ",".join(zone_nums)])
         else:
             print("Area config does not have zones!")
             exit(-1)
@@ -83,14 +135,29 @@ else:
     exit(-1)
 
 if "user_code" in config and config["user_code"] != "":
-    args += " -u " + config["user_code"]
+    args.extend(["-u", str(config["user_code"])])
 
 if "status_period" in config:
-    args += " -S " + str(config["status_period"])
-
-if "log_file" in config:
-    args += " >> " + config["log_file"] + " 2>&1"
+    args.extend(["-S", str(config["status_period"])])
 
 print("The final command:")
-print(args)
-os.system(args)
+print(" ".join(shlex.quote(arg) for arg in args))
+
+log_file = config.get("log_file")
+log_max_size_mb = config.get("log_max_size_mb", DEFAULT_LOG_MAX_SIZE_MB)
+try:
+    log_max_size_bytes = int(log_max_size_mb) * 1024 * 1024
+except (TypeError, ValueError):
+    print("Invalid log_max_size_mb value in config, using default 10 MB")
+    log_max_size_bytes = DEFAULT_LOG_MAX_SIZE_MB * 1024 * 1024
+
+if log_file:
+    proc = subprocess.Popen(args, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+    while True:
+        chunk = proc.stdout.read(4096)
+        if not chunk:
+            break
+        append_with_limit(str(log_file), chunk, log_max_size_bytes)
+    sys.exit(proc.wait())
+else:
+    sys.exit(subprocess.call(args))

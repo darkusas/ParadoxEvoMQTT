@@ -78,6 +78,7 @@ void *killpublisher = NULL;
 void print_usage();
 static int create_daemon();
 static void s_catch_signals();
+static void parse_zone_attr(const char *optarg, int (*setter)(int, const char *), const char *opt_name);
 
 int main(int argc, char **argv)
 {
@@ -109,6 +110,9 @@ int main(int argc, char **argv)
         {"user_code",     required_argument, 0, 'u'},
         {"status_period", required_argument, 0, 'S'},
         {"zone_name",     required_argument, 0, 'N'},
+        {"zone_device_class", required_argument, 0, 'C'},
+        {"zone_entity_category", required_argument, 0, 'E'},
+        {"zone_icon", required_argument, 0, 'I'},
         {"help",          no_argument,       0, 'h'},
         {"verbose",       no_argument,       0, 'v'},
         {0, 0, 0, 0}
@@ -126,7 +130,7 @@ int main(int argc, char **argv)
     char *serialdevice = NULL;
 
     while(1) {
-    c = getopt_long(argc, argv, "m:p:t:l:w:ra:z:Dd:u:N:S:hv", long_options, &opt_idx);
+    c = getopt_long(argc, argv, "m:p:t:l:w:ra:z:Dd:u:N:C:E:I:S:hv", long_options, &opt_idx);
 
         if (c < 0) {
             break;
@@ -205,19 +209,20 @@ int main(int argc, char **argv)
                 areanum = 0;
             break;
 
-            case 'N': {
-                char *colon = strchr(optarg, ':');
-                if (colon != NULL) {
-                    int znum = strtol(optarg, NULL, 10);
-                    if (znum > 0 && znum <= MAX_ZONES) {
-                        para_mgr_set_zone_name(znum, colon + 1);
-                    } else {
-                        log_error("PARAEVO: Zone number %d in --zone_name is not valid!\n", znum);
-                    }
-                } else {
-                    log_error("PARAEVO: --zone_name format must be N:name (e.g. --zone_name=1:VoniosPIR)\n");
-                }
-            }
+            case 'N':
+                parse_zone_attr(optarg, para_mgr_set_zone_name, "--zone_name");
+            break;
+
+            case 'C':
+                parse_zone_attr(optarg, para_mgr_set_zone_device_class, "--zone_device_class");
+            break;
+
+            case 'E':
+                parse_zone_attr(optarg, para_mgr_set_zone_entity_category, "--zone_entity_category");
+            break;
+
+            case 'I':
+                parse_zone_attr(optarg, para_mgr_set_zone_icon, "--zone_icon");
             break;
 
             case 'd':
@@ -408,9 +413,32 @@ void print_usage()
         "                                           Minimum is 60 s (and it's default).\n"
         "\n"
         "Other options:\n"
-        "  -v, --verbose                            Print verbose output of daemon's actions.\n"
+        "  -v, --verbose                            Enable full logging (INFO/VERB/DBG). Default logs only errors.\n"
+        "  -N <zone:name> --zone_name=<zone:name>  Set custom name for a configured zone.\n"
+        "  -C <zone:class> --zone_device_class=<zone:class>\n"
+        "                                           Set HA device_class for a configured zone.\n"
+        "  -E <zone:cat> --zone_entity_category=<zone:cat>\n"
+        "                                           Set HA entity_category for a configured zone.\n"
+        "  -I <zone:icon> --zone_icon=<zone:icon>  Set HA icon for a configured zone.\n"
         "  -h, --help                               Print this usage message and exit.\n"
         "  --version                                Print application's version and exit.\n"
         "\n"
     ); 
+}
+
+static void parse_zone_attr(const char *optarg, int (*setter)(int, const char *), const char *opt_name)
+{
+    const char *value = strchr(optarg, ':');
+    if (value == NULL) {
+        log_error("PARAEVO: %s format must be N:value (e.g. %s=1:motion)\n", opt_name, opt_name);
+        return;
+    }
+
+    int znum = strtol(optarg, NULL, 10);
+    if (znum < 1 || znum > MAX_ZONES) {
+        log_error("PARAEVO: Zone number %d in %s is not valid!\n", znum, opt_name);
+        return;
+    }
+
+    setter(znum, value + 1);
 }

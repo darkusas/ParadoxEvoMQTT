@@ -91,9 +91,11 @@ Instead of passing command-line switches every time, the recommended way to conf
 |-----|----------|-------------|
 | `device` | **Yes** | Path to the serial device where PRT3 is connected |
 | `binary_path` | No | Override path to the `paraevo` binary (default: `/opt/paraevo/paraevo`) |
-| `log_file` | No | Redirect daemon stdout/stderr to this file |
+| `log_file` | No | Write daemon stdout/stderr to this file (with size cap) |
+| `log_max_size_mb` | No | Maximum log file size in MB (default: `10`) |
 | `daemon` | No | Run in background as a daemon (`true`/`false`, default `false`) |
-| `verbose` | No | Enable verbose logging (`true`/`false`, default `false`) |
+| `log` | No | Enable full logging (`true`/`false`). Default `false` = only `ERROR` logs |
+| `verbose` | No | Legacy alias of `log` for backward compatibility |
 | `status_period` | No | Seconds between periodic area-status requests when idle (default: 60) |
 | `user_code` | No | Panel user code — **required for Disarm** |
 | `mqtt.server` | **Yes** | IP address or hostname of the MQTT broker |
@@ -103,9 +105,12 @@ Instead of passing command-line switches every time, the recommended way to conf
 | `mqtt.retain` | No | Retain all published messages (`true`/`false`). Recommended `true` so Home Assistant knows the last state after a restart |
 | `areas` | **Yes** | List of areas/partitions to monitor (at least one required) |
 | `areas[].num` | **Yes** | Area number (1–8) |
-| `areas[].zones` | **Yes** | List of zones assigned to this area. Each zone is either a bare number or an object with `num` and optional `name` fields |
+| `areas[].zones` | **Yes** | List of zones assigned to this area. Each zone is either a bare number or an object with `num` and optional metadata fields |
 | `zones[].num` | **Yes** | Zone number |
 | `zones[].name` | No | Human-readable zone name, used for Home Assistant MQTT auto-discovery labels |
+| `zones[].device_class` | No | Home Assistant `device_class` for the zone (default: `motion`) |
+| `zones[].entity_category` | No | Optional Home Assistant `entity_category` |
+| `zones[].icon` | No | Optional Home Assistant `icon` |
 
 ### Full annotated example
 
@@ -123,8 +128,14 @@ log_file: /var/log/paraevo.log
 # Optional: run the daemon in the background.
 daemon: false
 
-# Optional: print verbose output (useful for debugging).
-verbose: true
+# Optional: cap log file size in MB (default 10).
+log_max_size_mb: 10
+
+# Optional: full logging (INFO/VERB/DBG). Default false = only ERROR logs.
+log: false
+
+# Optional: legacy alias for "log".
+verbose: false
 
 # Optional: how often (in seconds) to poll area status when there is no panel activity.
 status_period: 60
@@ -148,6 +159,7 @@ areas:
     zones:
       - num: 1
         name: "HallwayPIR"
+        device_class: "motion"
       - num: 2
         name: "LivingRoomPIR"
       - num: 3
@@ -163,19 +175,21 @@ areas:
     zones:
       - num: 10
         name: "PerimeterFence"
+        entity_category: "diagnostic"
+        icon: "mdi:shield-home"
       - num: 11
         name: "OutdoorMotion"
 ```
 
 The generated command for the above example would be equivalent to:
 ```
-/opt/paraevo/paraevo -v -d /dev/serial/by-id/... \
+/opt/paraevo/paraevo -d /dev/serial/by-id/... \
   --mqtt_server=192.168.1.100 --mqtt_port=1883 \
   --mqtt_login=mqtt_user --mqtt_password=mqtt_password -r \
   -u 1234 \
-  -a 1 -z 1,2,3,4,5,6 --zone_name=1:HallwayPIR --zone_name=2:LivingRoomPIR ... \
-  -a 2 -z 10,11 --zone_name=10:PerimeterFence --zone_name=11:OutdoorMotion \
-  -S 60 >> /var/log/paraevo.log 2>&1
+  -a 1 --zone_name=1:HallwayPIR --zone_device_class=1:motion -z 1,2,3,4,5,6 ... \
+  -a 2 --zone_name=10:PerimeterFence --zone_entity_category=10:diagnostic --zone_icon=10:mdi:shield-home -z 10,11 ... \
+  -S 60
 ```
 
 # Configuration of PRT3
@@ -220,7 +234,8 @@ alarm_control_panel:
 Zone auto-discovery messages are published to:
 `homeassistant/binary_sensor/paraevo_Z<zone_number>/config`
 
-Discovered zone entities are published with `device_class: motion`, so Home Assistant treats them as motion sensors by default.
+Discovered zone entities use `device_class: motion` by default.  
+You can override `device_class` per zone, and optionally set `entity_category` and `icon` in YAML.
 
 To add auto-discovered sensors in Home Assistant:
 1. In Home Assistant, add/configure the MQTT integration (`Settings -> Devices & Services -> Add Integration -> MQTT`).
@@ -231,14 +246,14 @@ To add auto-discovered sensors in Home Assistant:
 No manual `binary_sensor` YAML is required for discovered zones.
 
 ## Zone Topics
-Each zone has a topic `darauble/paraevo/area/1/zone/1`. If sensor is off, the reported payload is `off`. It is set to `on` if zone:
+Each zone has a topic `darauble/paraevo/area/1/zone/1`. If sensor is off, the reported payload is `OFF`. It is set to `ON` if zone:
 * is open
 * is tampered
 * is on fire loop trouble
 
 It is oversimplified, I know, but I wanted to keep this topic as a *binary sensor* for Home Assistant.
 
-Also each zone has a topic for alarm reporting: `darauble/paraevo/area/1/zone/1/alarm`. Again, it is binary: `on`/`off`.
+Also each zone has a topic for alarm reporting: `darauble/paraevo/area/1/zone/1/alarm`. Again, it is binary: `ON`/`OFF`.
 
 And if that is not enough, there's a JSON topic `darauble/paraevo/area/1/zone/1/state`. It again contains the states from PRT3 directly:
 `{"num": 1,"area": 1,"name": "Living room","status": "C","alarm": "O","fire": "O","supervision": "O","battery": "O","bypassed": "O"}`
@@ -249,8 +264,8 @@ binary_sensor:
   - platform: mqtt
     name: "Living Room"
     state_topic: "darauble/paraevo/area/1/zone/1/state"
-    payload_on: "on"
-    payload_off: "off"
+    payload_on: "ON"
+    payload_off: "OFF"
 ```
 
 **NOTE**: _bypassed_ flag is not yet supported in v0.3! TBD.
