@@ -524,7 +524,7 @@ static void mqtt_publish_ha_discovery_for_configured_zones()
         }
 
         int area = para_mgr_get_zone_area(i);
-        if (area < 1 || area > MAX_AREAS) {
+        if (area < 1) {
             continue;
         }
 
