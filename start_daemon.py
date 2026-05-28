@@ -68,7 +68,7 @@ def _zone_attrs(zone) -> dict[str, str]:
     return attrs
 
 
-def _maybe_trim_log_file(log_path: Path, max_size_mb) -> None:
+def _maybe_trim_log_file(log_path: Path, max_size_mb: int | str | None) -> None:
     try:
         max_size_mb = int(max_size_mb) if max_size_mb is not None else 10
     except (TypeError, ValueError):
@@ -79,9 +79,15 @@ def _maybe_trim_log_file(log_path: Path, max_size_mb) -> None:
 
     max_size_bytes = max_size_mb * 1024 * 1024
 
-    if log_path.exists() and log_path.stat().st_size > max_size_bytes:
+    if log_path.exists():
+        file_size = log_path.stat().st_size
+    else:
+        file_size = 0
+
+    if file_size > max_size_bytes:
+        keep_bytes = min(file_size, max_size_bytes)
         with log_path.open("rb") as f:
-            f.seek(-max_size_bytes, os.SEEK_END)
+            f.seek(-keep_bytes, os.SEEK_END)
             tail = f.read()
 
         first_newline = tail.find(b"\n")
