@@ -52,6 +52,52 @@ def _zone_name(zone) -> str | None:
     return None
 
 
+def _zone_attrs(zone) -> dict[str, str]:
+    if not isinstance(zone, dict):
+        return {}
+
+    attrs: dict[str, str] = {}
+    for key in ("device_class", "entity_category", "icon"):
+        value = zone.get(key)
+        if value is None:
+            continue
+        value = str(value).strip()
+        if value == "":
+            continue
+        attrs[key] = value
+    return attrs
+
+
+def _maybe_trim_log_file(log_path: Path, max_size_mb: int | str | None) -> None:
+    try:
+        max_size_mb = int(max_size_mb) if max_size_mb is not None else 10
+    except (TypeError, ValueError):
+        raise ValueError("log_max_size_mb must be an integer")
+
+    if max_size_mb < 1:
+        raise ValueError("log_max_size_mb must be >= 1")
+
+    max_size_bytes = max_size_mb * 1024 * 1024
+
+    if log_path.exists():
+        file_size = log_path.stat().st_size
+    else:
+        file_size = 0
+
+    if file_size > max_size_bytes:
+        keep_bytes = min(file_size, max_size_bytes)
+        with log_path.open("rb") as f:
+            f.seek(-keep_bytes, os.SEEK_END)
+            tail = f.read()
+
+        first_newline = tail.find(b"\n")
+        if first_newline >= 0 and first_newline + 1 < len(tail):
+            tail = tail[first_newline + 1:]
+
+        with log_path.open("wb") as f:
+            f.write(tail)
+
+
 def build_args(cfg: dict) -> list[str]:
     device = cfg.get("device")
     if not device:
@@ -61,8 +107,11 @@ def build_args(cfg: dict) -> list[str]:
 
     args: list[str] = [binary_path]
 
-    if _as_bool(cfg.get("verbose"), default=False):
+    if _as_bool(cfg.get("verbose"), default=False) or _as_bool(cfg.get("log"), default=False):
         args.append("-v")
+
+    if _as_bool(cfg.get("daemon"), default=False):
+        args.append("-D")
 
     args.extend(["-d", str(device)])
 
@@ -115,11 +164,16 @@ def build_args(cfg: dict) -> list[str]:
         for z in zones:
             zn = _zone_num(z)
             name = _zone_name(z)
-            if name is None:
-                continue
-            if name == "":
-                continue
-            args.append(f"--zone_name={zn}:{name}")
+            if name is not None and name != "":
+                args.append(f"--zone_name={zn}:{name}")
+
+            attrs = _zone_attrs(z)
+            if "device_class" in attrs:
+                args.append(f"--zone_device_class={zn}:{attrs['device_class']}")
+            if "entity_category" in attrs:
+                args.append(f"--zone_entity_category={zn}:{attrs['entity_category']}")
+            if "icon" in attrs:
+                args.append(f"--zone_icon={zn}:{attrs['icon']}")
 
     status_period = cfg.get("status_period")
     if status_period is not None:
@@ -139,6 +193,7 @@ def main() -> int:
     if log_file:
         log_path = Path(str(log_file))
         log_path.parent.mkdir(parents=True, exist_ok=True)
+        _maybe_trim_log_file(log_path, cfg.get("log_max_size_mb"))
         with log_path.open("a", encoding="utf-8") as f:
             print("The final command:")
             print(" ".join(args))
