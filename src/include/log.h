@@ -36,7 +36,7 @@ extern para_evo_config_t config;
     fprintf(stderr, "[%d-%02d-%02d %02d:%02d:%02d ERROR] " s, d->tm_year + 1900, d->tm_mon + 1, d->tm_mday, d->tm_hour, d->tm_min, d->tm_sec, ##__VA_ARGS__); \
 }
 
-#define log_info(s, ...) { \
+#define log_info(s, ...) if (config.verbose) { \
     time_t t = time(NULL); \
     struct tm *d = localtime(&t); \
     printf("[%d-%02d-%02d %02d:%02d:%02d INFO] " s, d->tm_year + 1900, d->tm_mon + 1, d->tm_mday, d->tm_hour, d->tm_min, d->tm_sec, ##__VA_ARGS__); \

@@ -73,6 +73,12 @@ typedef struct {
     int area;
     char name[LABEL_LENGTH];
     int name_configured; // Name set by user config, do not overwrite from panel label
+    char device_class[LABEL_LENGTH];
+    int device_class_configured;
+    char entity_category[LABEL_LENGTH];
+    int entity_category_configured;
+    char icon[LABEL_LENGTH];
+    int icon_configured;
     mqtt_zone_state_t mqtt_state;
     char status;
     char alarm;

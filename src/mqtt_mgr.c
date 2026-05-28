@@ -52,19 +52,10 @@ extern para_evo_config_t config;
 "}"
 
 #define HA_DISCOVERY_TOPIC "homeassistant/binary_sensor/paraevo_Z%d/config"
-#define HA_DISCOVERY_JSON "{" \
-    "\"name\": \"Z%d-%s\"," \
-    "\"state_topic\": \"%s/area/%d/zone/%d\"," \
-    "\"payload_on\": \"True\"," \
-    "\"payload_off\": \"False\"," \
-    "\"availability_topic\": \"%s/daemon\"," \
-    "\"payload_available\": \"online\"," \
-    "\"payload_not_available\": \"offline\"," \
-    "\"unique_id\": \"paraevo_Z%d\"" \
-"}"
 
 #define HA_DISCOVERY_TOPIC_SIZE 128
 #define HA_DISCOVERY_PAYLOAD_SIZE 512
+#define MIN_JSON_FALLBACK_SIZE 3
 
 #define DAEMON_ONLINE "online"
 #define DAEMON_OFFLINE "offline"
@@ -91,8 +82,8 @@ static const char *mqp_states[] = {
 };
 
 static const char *mqz_states[] = {
-    "False",
-    "True",
+    "OFF",
+    "ON",
 };
 
 static MQTTAsync client;
@@ -104,6 +95,7 @@ static void mqtt_zone_report(void *zone_report_reader);
 static void mqtt_send(const char *topic, const char *payload);
 static void mqtt_send_retained(const char *topic, const char *payload);
 static void mqtt_send_lwt();
+static void mqtt_build_ha_discovery_payload(char *dst, size_t dst_size, int zone_num, const char *display_name, int area_num, const char *device_class, const char *entity_category, const char *icon);
 static void mqtt_publish_ha_discovery_for_configured_zones();
 static void mqtt_stop();
 
@@ -354,11 +346,15 @@ static void mqtt_zone_report(void *zone_report_reader)
         const char *display_name = (zone->name[0] != '\0') ? zone->name : "Unknown";
 
         snprintf(ha_topic, sizeof(ha_topic), HA_DISCOVERY_TOPIC, zone->num);
-        snprintf(ha_payload, sizeof(ha_payload), HA_DISCOVERY_JSON,
-            zone->num, display_name,
-            config.mqtt_topic, zone->area, zone->num,
-            config.mqtt_topic,
-            zone->num
+        mqtt_build_ha_discovery_payload(
+            ha_payload,
+            sizeof(ha_payload),
+            zone->num,
+            display_name,
+            zone->area,
+            zone->device_class,
+            zone->entity_category_configured ? zone->entity_category : NULL,
+            zone->icon_configured ? zone->icon : NULL
         );
         mqtt_send_retained(ha_topic, ha_payload);
         log_info("MMGR: published HA discovery for zone %d (%s)\n", zone->num, display_name);
@@ -529,18 +525,101 @@ static void mqtt_publish_ha_discovery_for_configured_zones()
         }
 
         const char *zone_name = para_mgr_get_zone_name(i);
+        const char *device_class = para_mgr_get_zone_device_class(i);
+        const char *entity_category = para_mgr_get_zone_entity_category(i);
+        const char *icon = para_mgr_get_zone_icon(i);
         const char *display_name = (zone_name && zone_name[0] != '\0') ? zone_name : "Unknown";
         char ha_topic[HA_DISCOVERY_TOPIC_SIZE];
         char ha_payload[HA_DISCOVERY_PAYLOAD_SIZE];
 
         snprintf(ha_topic, sizeof(ha_topic), HA_DISCOVERY_TOPIC, i);
-        snprintf(ha_payload, sizeof(ha_payload), HA_DISCOVERY_JSON,
-            i, display_name,
-            config.mqtt_topic, area, i,
-            config.mqtt_topic,
-            i
+        mqtt_build_ha_discovery_payload(
+            ha_payload,
+            sizeof(ha_payload),
+            i,
+            display_name,
+            area,
+            device_class,
+            entity_category,
+            icon
         );
         mqtt_send_retained(ha_topic, ha_payload);
+    }
+}
+
+static void mqtt_build_ha_discovery_payload(
+    char *dst,
+    size_t dst_size,
+    int zone_num,
+    const char *display_name,
+    int area_num,
+    const char *device_class,
+    const char *entity_category,
+    const char *icon
+)
+{
+    size_t offset = 0;
+    int written = 0;
+    const char *resolved_device_class = (device_class && device_class[0] != '\0') ? device_class : "motion";
+
+    written = snprintf(
+        dst + offset,
+        dst_size - offset,
+        "{"
+            "\"name\": \"Z%d-%s\","
+            "\"state_topic\": \"%s/area/%d/zone/%d\","
+            "\"payload_on\": \"ON\","
+            "\"payload_off\": \"OFF\","
+            "\"device_class\": \"%s\"",
+        zone_num,
+        display_name,
+        config.mqtt_topic, area_num, zone_num,
+        resolved_device_class
+    );
+    if (written < 0 || (size_t)written >= dst_size - offset) {
+        goto TRUNCATED;
+    }
+    offset += (size_t)written;
+
+    if (entity_category && entity_category[0] != '\0' && offset < dst_size) {
+        written = snprintf(dst + offset, dst_size - offset, ",\"entity_category\": \"%s\"", entity_category);
+        if (written < 0 || (size_t)written >= dst_size - offset) {
+            goto TRUNCATED;
+        }
+        offset += (size_t)written;
+    }
+
+    if (icon && icon[0] != '\0' && offset < dst_size) {
+        written = snprintf(dst + offset, dst_size - offset, ",\"icon\": \"%s\"", icon);
+        if (written < 0 || (size_t)written >= dst_size - offset) {
+            goto TRUNCATED;
+        }
+        offset += (size_t)written;
+    }
+
+    written = snprintf(
+        dst + offset,
+        dst_size - offset,
+        ","
+            "\"availability_topic\": \"%s/daemon\","
+            "\"payload_available\": \"online\","
+            "\"payload_not_available\": \"offline\","
+            "\"unique_id\": \"paraevo_Z%d\""
+        "}",
+        config.mqtt_topic,
+        zone_num
+    );
+    if (written < 0 || (size_t)written >= dst_size - offset) {
+        goto TRUNCATED;
+    }
+    return;
+
+TRUNCATED:
+    log_error("MMGR: HA discovery payload truncated for zone %d, sending fallback payload\n", zone_num);
+    if (dst_size >= MIN_JSON_FALLBACK_SIZE) {
+        snprintf(dst, dst_size, "{}");
+    } else if (dst_size > 0) {
+        dst[0] = '\0';
     }
 }
 

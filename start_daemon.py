@@ -1,162 +1,177 @@
-#!/usr/bin/env python3
-
+#!/usr/bin/python3
 import os
 import subprocess
 import sys
-from pathlib import Path
+import tempfile
 
 import yaml
 
-
-def _as_bool(value, default=False):
-    if value is None:
-        return default
-    if isinstance(value, bool):
-        return value
-    if isinstance(value, (int, float)):
-        return bool(value)
-    if isinstance(value, str):
-        return value.strip().lower() in {"1", "true", "yes", "y", "on"}
-    return default
+DEFAULT_BINARY_PATH = "/opt/paraevo/paraevo"
+DEFAULT_CONFIG_FILE = "/etc/paraevo.yaml"
+DEFAULT_LOG_MAX_SIZE_MB = 10
 
 
-def _load_config(path: str) -> dict:
-    config_path = Path(path)
-    if not config_path.exists():
-        raise FileNotFoundError(f"Config file not found: {config_path}")
+def append_with_limit(path, data, max_size_bytes):
+    if max_size_bytes <= 0:
+        max_size_bytes = DEFAULT_LOG_MAX_SIZE_MB * 1024 * 1024
 
-    with config_path.open("r", encoding="utf-8") as f:
-        data = yaml.safe_load(f)
+    log_dir = os.path.dirname(path)
+    if log_dir:
+        os.makedirs(log_dir, exist_ok=True)
+    target_dir = log_dir if log_dir else "."
 
-    if not isinstance(data, dict):
-        raise ValueError("Config root must be a YAML mapping")
+    def write_atomic(content):
+        fd, temp_path = tempfile.mkstemp(dir=target_dir, prefix=".paraevo-log-", suffix=".tmp")
+        try:
+            with os.fdopen(fd, "wb") as f:
+                f.write(content)
+            os.replace(temp_path, path)
+        finally:
+            if os.path.exists(temp_path):
+                os.unlink(temp_path)
 
-    return data
+    existing_size = os.path.getsize(path) if os.path.exists(path) else 0
+    if len(data) >= max_size_bytes:
+        write_atomic(data[-max_size_bytes:])
+        return
+
+    if existing_size + len(data) <= max_size_bytes:
+        try:
+            with open(path, "ab") as f:
+                f.write(data)
+        except OSError:
+            write_atomic(data)
+        return
+
+    keep = max_size_bytes - len(data)
+    with open(path, "rb") as f:
+        if keep > 0:
+            f.seek(max(existing_size - keep, 0))
+            tail = f.read(keep)
+        else:
+            tail = b""
+
+    write_atomic(tail + data)
 
 
-def _zone_num(zone) -> int:
-    if isinstance(zone, int):
-        return zone
+def parse_zone_entry(zone):
+    if isinstance(zone, (int, float)):
+        return int(zone), {}
+
     if isinstance(zone, dict) and "num" in zone:
-        return int(zone["num"])
-    raise ValueError(f"Invalid zone entry: {zone!r}")
+        meta = {}
+        for key in ("name", "device_class", "entity_category", "icon"):
+            value = zone.get(key)
+            if value is not None and value != "":
+                meta[key] = str(value)
+        return int(zone["num"]), meta
+
+    raise ValueError("Invalid zone config entry!")
 
 
-def _zone_name(zone) -> str | None:
-    if isinstance(zone, dict):
-        name = zone.get("name")
-        if name is None:
-            return None
-        name = str(name)
-        return name
-    return None
+config_file = DEFAULT_CONFIG_FILE
+if len(sys.argv) > 1:
+    config_file = sys.argv[1]
 
+with open(config_file, "r") as f:
+    config = yaml.load(f, Loader=yaml.FullLoader)
 
-def build_args(cfg: dict) -> list[str]:
-    device = cfg.get("device")
-    if not device:
-        raise ValueError("Missing required key: device")
+binary_path = config.get("binary_path", DEFAULT_BINARY_PATH)
+args = [binary_path]
 
-    binary_path = str(cfg.get("binary_path") or "/opt/paraevo/paraevo")
+enable_full_logging = bool(config.get("log", False) or config.get("verbose", False))
+if enable_full_logging:
+    args.append("-v")
 
-    args: list[str] = [binary_path]
+if config.get("daemon") is True:
+    args.append("-D")
 
-    if _as_bool(cfg.get("verbose"), default=False):
-        args.append("-v")
+if "device" in config:
+    args.extend(["-d", str(config["device"])])
+else:
+    print("Device not present in config!")
+    exit(-1)
 
-    args.extend(["-d", str(device)])
+if "mqtt" in config:
+    if "server" in config["mqtt"]:
+        args.append("--mqtt_server=" + str(config["mqtt"]["server"]))
+    else:
+        print("No MQTT server in config!")
 
-    mqtt = cfg.get("mqtt") or {}
-    if not isinstance(mqtt, dict):
-        raise ValueError("mqtt must be a mapping")
+    if "port" in config["mqtt"]:
+        args.append("--mqtt_port=" + str(config["mqtt"]["port"]))
 
-    mqtt_server = mqtt.get("server")
-    if not mqtt_server:
-        raise ValueError("Missing required key: mqtt.server")
+    if "login" in config["mqtt"]:
+        args.append("--mqtt_login=" + str(config["mqtt"]["login"]))
 
-    args.append(f"--mqtt_server={mqtt_server}")
+    if "password" in config["mqtt"]:
+        args.append("--mqtt_password=" + str(config["mqtt"]["password"]))
 
-    mqtt_port = mqtt.get("port")
-    if mqtt_port is not None:
-        args.append(f"--mqtt_port={int(mqtt_port)}")
-
-    mqtt_login = mqtt.get("login")
-    if mqtt_login:
-        args.append(f"--mqtt_login={mqtt_login}")
-
-    mqtt_password = mqtt.get("password")
-    if mqtt_password:
-        args.append(f"--mqtt_password={mqtt_password}")
-
-    if _as_bool(mqtt.get("retain"), default=False):
+    if config["mqtt"].get("retain") is True:
         args.append("-r")
 
-    user_code = cfg.get("user_code")
-    if user_code is not None and str(user_code) != "":
-        args.extend(["-u", str(user_code)])
+else:
+    print("No MQTT settings in config!")
+    exit(-1)
 
-    areas = cfg.get("areas")
-    if not isinstance(areas, list) or not areas:
-        raise ValueError("areas must be a non-empty list")
+if "areas" in config:
+    for area in config["areas"]:
+        if "num" in area:
+            args.extend(["-a", str(area["num"])])
+        else:
+            print("Area config does not have \"num\"!")
+            exit(-1)
 
-    for area in areas:
-        if not isinstance(area, dict) or "num" not in area:
-            raise ValueError(f"Invalid area entry: {area!r}")
+        if "zones" in area:
+            zone_nums = []
+            for zone in area["zones"]:
+                try:
+                    zone_num, meta = parse_zone_entry(zone)
+                except ValueError as exc:
+                    print(str(exc))
+                    exit(-1)
 
-        area_num = int(area["num"])
-        zones = area.get("zones")
-        if not isinstance(zones, list) or not zones:
-            raise ValueError(f"Area {area_num} has no zones list")
+                zone_nums.append(str(zone_num))
+                if "name" in meta:
+                    args.append(f"--zone_name={zone_num}:{meta['name']}")
+                if "device_class" in meta:
+                    args.append(f"--zone_device_class={zone_num}:{meta['device_class']}")
+                if "entity_category" in meta:
+                    args.append(f"--zone_entity_category={zone_num}:{meta['entity_category']}")
+                if "icon" in meta:
+                    args.append(f"--zone_icon={zone_num}:{meta['icon']}")
+            args.extend(["-z", ",".join(zone_nums)])
+        else:
+            print("Area config does not have zones!")
+            exit(-1)
+else:
+    print("No area config!")
+    exit(-1)
 
-        zone_numbers = [str(_zone_num(z)) for z in zones]
+if "user_code" in config and config["user_code"] != "":
+    args.extend(["-u", str(config["user_code"])])
 
-        args.extend(["-a", str(area_num), "-z", ",".join(zone_numbers)])
+if "status_period" in config:
+    args.extend(["-S", str(config["status_period"])])
 
-        for z in zones:
-            zn = _zone_num(z)
-            name = _zone_name(z)
-            if name is None:
-                continue
-            if name == "":
-                continue
-            args.append(f"--zone_name={zn}:{name}")
+print("The final command:")
+print("(hidden for security)")
 
-    status_period = cfg.get("status_period")
-    if status_period is not None:
-        args.extend(["-S", str(int(status_period))])
+log_file = config.get("log_file")
+log_max_size_mb = config.get("log_max_size_mb", DEFAULT_LOG_MAX_SIZE_MB)
+try:
+    log_max_size_bytes = int(log_max_size_mb) * 1024 * 1024
+except (TypeError, ValueError):
+    print("Invalid log_max_size_mb value in config, using default 10 MB")
+    log_max_size_bytes = DEFAULT_LOG_MAX_SIZE_MB * 1024 * 1024
 
-    return args
-
-
-def main() -> int:
-    cfg_path = sys.argv[1] if len(sys.argv) > 1 else "/etc/paraevo.yaml"
-    cfg = _load_config(cfg_path)
-
-    args = build_args(cfg)
-
-    # Logging redirection (append). If not set, inherit container stdout/stderr.
-    log_file = cfg.get("log_file")
-    if log_file:
-        log_path = Path(str(log_file))
-        log_path.parent.mkdir(parents=True, exist_ok=True)
-        with log_path.open("a", encoding="utf-8") as f:
-            print("The final command:")
-            print(" ".join(args))
-            f.write("The final command:\n")
-            f.write(" ".join(args) + "\n")
-            f.flush()
-            proc = subprocess.run(args, stdout=f, stderr=subprocess.STDOUT)
-            return int(proc.returncode)
-
-    print("The final command:")
-    print(" ".join(args))
-    proc = subprocess.run(args)
-    return int(proc.returncode)
-
-
-if __name__ == "__main__":
-    try:
-        raise SystemExit(main())
-    except Exception as e:
-        print(f"start_daemon.py error: {e}", file=sys.stderr)
-        raise
+if log_file:
+    proc = subprocess.Popen(args, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+    while True:
+        chunk = proc.stdout.read(4096)
+        if not chunk:
+            break
+        append_with_limit(str(log_file), chunk, log_max_size_bytes)
+    sys.exit(proc.wait())
+else:
+    sys.exit(subprocess.call(args))

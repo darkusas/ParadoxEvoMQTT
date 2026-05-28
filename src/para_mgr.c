@@ -125,6 +125,8 @@ int para_mgr_set_zone(int area_num, int zone_num)
         memset(zones[zidx], 0, sizeof(para_zone_t));
         zones[zidx]->num = zone_num;
         zones[zidx]->area = area_num;
+        strncpy(zones[zidx]->device_class, "motion", LABEL_LENGTH - 1);
+        zones[zidx]->device_class[LABEL_LENGTH - 1] = '\0';
         zones[zidx]->bypassed = RS_OK;
         zones[zidx]->firstreport = 1;
         
@@ -187,6 +189,30 @@ const char *para_mgr_get_zone_name(int zone_num)
     return zones[zone_num - 1]->name;
 }
 
+const char *para_mgr_get_zone_device_class(int zone_num)
+{
+    if (zone_num < 1 || zone_num > MAX_ZONES || zones[zone_num - 1] == NULL) {
+        return NULL;
+    }
+    return zones[zone_num - 1]->device_class;
+}
+
+const char *para_mgr_get_zone_entity_category(int zone_num)
+{
+    if (zone_num < 1 || zone_num > MAX_ZONES || zones[zone_num - 1] == NULL) {
+        return NULL;
+    }
+    return zones[zone_num - 1]->entity_category;
+}
+
+const char *para_mgr_get_zone_icon(int zone_num)
+{
+    if (zone_num < 1 || zone_num > MAX_ZONES || zones[zone_num - 1] == NULL) {
+        return NULL;
+    }
+    return zones[zone_num - 1]->icon;
+}
+
 int para_mgr_set_zone_name(int zone_num, const char *name)
 {
     if (zone_num < 1 || zone_num > MAX_ZONES || zones[zone_num - 1] == NULL) {
@@ -199,6 +225,45 @@ int para_mgr_set_zone_name(int zone_num, const char *name)
     zones[zone_num - 1]->name_configured = 1;
 
     log_verbose("PMGR: zone %d name set to [%s]\n", zone_num, zones[zone_num - 1]->name);
+    return 0;
+}
+
+int para_mgr_set_zone_device_class(int zone_num, const char *device_class)
+{
+    if (zone_num < 1 || zone_num > MAX_ZONES || zones[zone_num - 1] == NULL) {
+        log_error("PMGR: cannot set device class for unconfigured zone %d\n", zone_num);
+        return -1;
+    }
+
+    strncpy(zones[zone_num - 1]->device_class, device_class, LABEL_LENGTH - 1);
+    zones[zone_num - 1]->device_class[LABEL_LENGTH - 1] = '\0';
+    zones[zone_num - 1]->device_class_configured = 1;
+    return 0;
+}
+
+int para_mgr_set_zone_entity_category(int zone_num, const char *entity_category)
+{
+    if (zone_num < 1 || zone_num > MAX_ZONES || zones[zone_num - 1] == NULL) {
+        log_error("PMGR: cannot set entity category for unconfigured zone %d\n", zone_num);
+        return -1;
+    }
+
+    strncpy(zones[zone_num - 1]->entity_category, entity_category, LABEL_LENGTH - 1);
+    zones[zone_num - 1]->entity_category[LABEL_LENGTH - 1] = '\0';
+    zones[zone_num - 1]->entity_category_configured = 1;
+    return 0;
+}
+
+int para_mgr_set_zone_icon(int zone_num, const char *icon)
+{
+    if (zone_num < 1 || zone_num > MAX_ZONES || zones[zone_num - 1] == NULL) {
+        log_error("PMGR: cannot set icon for unconfigured zone %d\n", zone_num);
+        return -1;
+    }
+
+    strncpy(zones[zone_num - 1]->icon, icon, LABEL_LENGTH - 1);
+    zones[zone_num - 1]->icon[LABEL_LENGTH - 1] = '\0';
+    zones[zone_num - 1]->icon_configured = 1;
     return 0;
 }
 

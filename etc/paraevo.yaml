@@ -10,8 +10,14 @@ binary_path: ./paraevo
 # Not-mandatory: if daemon should run in background
 daemon: false
 
-# Not-mandatory: turn on verbose output
-verbose: true
+# Not-mandatory: legacy flag for verbose output (same effect as `log: true`)
+verbose: false
+
+# Not-mandatory: full daemon log (INFO/VERB/DBG). Default false = only ERROR logs
+log: false
+
+# Not-mandatory: maximum log file size in MB (default 10)
+log_max_size_mb: 10
 
 # Not-mandatory: how often to request area status while Paradox is idle
 status_period: 60
@@ -37,6 +43,7 @@ areas:
     zones:
       - num: 1
         name: "VoniosPIR"
+        device_class: "motion"
       - num: 2
         name: "KoridoriusPIR"
       - num: 3
@@ -51,6 +58,8 @@ areas:
         name: "GarazasD"
       - num: 10
         name: "BoilerisT"
+        entity_category: "diagnostic"
+        icon: "mdi:radiator"
   - num: 2
     zones:
       - num: 11

@@ -47,6 +47,9 @@ int para_mgr_set_area(int);
 int para_mgr_set_zone(int, int);
 
 int para_mgr_set_zone_name(int, const char *);
+int para_mgr_set_zone_device_class(int, const char *);
+int para_mgr_set_zone_entity_category(int, const char *);
+int para_mgr_set_zone_icon(int, const char *);
 
 pthread_t para_mgr_start(void*);
 
@@ -56,5 +59,8 @@ int para_mgr_is_area_configured(int);
 int para_mgr_is_zone_configured(int);
 int para_mgr_get_zone_area(int);
 const char *para_mgr_get_zone_name(int);
+const char *para_mgr_get_zone_device_class(int);
+const char *para_mgr_get_zone_entity_category(int);
+const char *para_mgr_get_zone_icon(int);
 
 #endif /* PARA_MGR_H */
